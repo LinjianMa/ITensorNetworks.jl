@@ -49,11 +49,12 @@ function mincut_subnetwork_insert_deltas(
   return source_subnetwork, remain_network
 end
 
-function binary_tree_partition(network::Vector{ITensor}, inds_btree::Vector; algorithm)
+function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector; algorithm)
+  network = Vector{ITensor}(tn)
   btree_to_output_tn = Dict{Union{Vector,Index},Vector{ITensor}}()
   btree_to_input_tn = Dict{Union{Vector,Index},Vector{ITensor}}()
   btree_to_input_tn[inds_btree] = network
-  for node in collect(PreOrderDFS(inds_btree))
+  for node in PreOrderDFS(inds_btree)
     @info "node is", node
     @assert haskey(btree_to_input_tn, node)
     input_tn = btree_to_input_tn[node]
