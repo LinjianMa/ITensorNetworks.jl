@@ -36,7 +36,7 @@ function mincut_subnetwork_insert_deltas(
   network = Vector{ITensor}(vcat(deltas, networkprime))
   @info length(network)
   @info source_inds, setdiff(out_inds, source_inds)
-  p1, _ = _mincut_partitions(ITensorNetwork(network), source_inds, setdiff(out_inds, source_inds))
+  p1, _ = _mincut_partition_maxweightoutinds(ITensorNetwork(network), source_inds, setdiff(out_inds, source_inds))
   @info "p1 is", p1
   source_subnetwork = [network[i] for i in p1]
   remain_network = setdiff(network, source_subnetwork)
@@ -53,8 +53,6 @@ function binary_tree_partition(network::Vector{ITensor}, inds_btree::Vector; alg
   btree_to_output_tn = Dict{Union{Vector,Index},Vector{ITensor}}()
   btree_to_input_tn = Dict{Union{Vector,Index},Vector{ITensor}}()
   btree_to_input_tn[inds_btree] = network
-  # nodes = reverse(topo_sort(inds_btree; type=Vector{<:Vector}))
-  # nodes = [nodes..., get_leaves(inds_btree)...]
   for node in collect(PreOrderDFS(inds_btree))
     @info "node is", node
     @assert haskey(btree_to_input_tn, node)

@@ -28,13 +28,21 @@ Calculate the mincut_partitions between two subsets of the uncontracted inds
 function _mincut_partitions(
   tn::ITensorNetwork, source_inds::Vector{<:Index}, terminal_inds::Vector{<:Index}
 )
-  tn, out_to_maxweight_ind = _maxweightoutinds_tn(tn, [source_inds..., terminal_inds...])
-  p1, p2, cut = _mincut(tn, [out_to_maxweight_ind[i] for i in source_inds], [out_to_maxweight_ind[i] for i in terminal_inds])
+  p1, p2, cut = _mincut(tn, source_inds, terminal_inds)
   p1 = [v[1] for v in p1 if v[2] == 2]
   p2 = [v[1] for v in p2 if v[2] == 2]
-  @assert length(p1) > 1
-  @assert length(p2) > 1
+  @assert length(p1) >= 1
+  @assert length(p2) >= 1
   return p1, p2
+end
+
+function _mincut_partition_maxweightoutinds(
+  tn::ITensorNetwork, source_inds::Vector{<:Index}, terminal_inds::Vector{<:Index}
+)
+  tn, out_to_maxweight_ind = _maxweightoutinds_tn(tn, [source_inds..., terminal_inds...])
+  source_inds = [out_to_maxweight_ind[i] for i in source_inds]
+  terminal_inds = [out_to_maxweight_ind[i] for i in terminal_inds]
+  return _mincut_partitions(tn, source_inds, terminal_inds)
 end
 
 """
