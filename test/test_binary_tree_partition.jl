@@ -67,9 +67,10 @@ using ITensorNetworks:
   tn = ITensorNetwork(network)
   inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
   @info "inds_btree", inds_btree
-  tnet_dict = binary_tree_partition(tn, inds_btree; algorithm="mincut")
-  @info "tnet_dict is", tnet_dict
-  network2 = vcat(collect(values(tnet_dict))...)
+  par = binary_tree_partition(tn, inds_btree; algorithm="mincut")
+  @info "partition is", par
+  networks = [Vector{ITensor}(par[v]) for v in vertices(par)]
+  network2 = vcat(networks...)
   out2 = contract(network2...)
   i1 = noncommoninds(network...)
   i2 = noncommoninds(network2...)
