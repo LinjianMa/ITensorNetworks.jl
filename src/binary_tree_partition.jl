@@ -117,7 +117,7 @@ function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector; algorithm
     end
   end
   tn_deltas = ITensorNetwork(vcat(output_deltas_vector...))
-  return partition(disjoint_union(tn1, tn_deltas), subgraph_vs)
+  return partition(ITensorNetwork{Any}(disjoint_union(tn1, tn_deltas)), subgraph_vs)
 end
 
 # _is_delta(t) = (t.tensor.storage.data == 1.0)

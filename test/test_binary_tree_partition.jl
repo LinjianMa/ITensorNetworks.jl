@@ -1,6 +1,9 @@
 using ITensors
 using ITensorNetworks:
-  _binary_tree_partition_inds, _mps_partition_inds_order, _mincut_partitions
+  _binary_tree_partition_inds,
+  _mps_partition_inds_order,
+  _mincut_partitions,
+  approx_itensornetwork!
 
 # @testset "test mincut functions on top of MPS" begin
 #   i = Index(2, "i")
@@ -69,9 +72,11 @@ using ITensorNetworks:
   @info "inds_btree", inds_btree
   par = binary_tree_partition(tn, inds_btree; algorithm="mincut")
   @info "partition is", par
-  networks = [Vector{ITensor}(par[v]) for v in vertices(par)]
-  network2 = vcat(networks...)
-  out2 = contract(network2...)
+  @info typeof(par)
+  approx_tn, lognorm = approx_itensornetwork!(par)
+  @info "approx_tn", approx_tn
+  network2 = Vector{ITensor}(approx_tn)
+  out2 = contract(network2...) * exp(lognorm)
   i1 = noncommoninds(network...)
   i2 = noncommoninds(network2...)
   @test (length(i1) == length(i2))
