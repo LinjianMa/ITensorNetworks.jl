@@ -120,8 +120,6 @@ function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector; algorithm
   return partition(ITensorNetwork{Any}(disjoint_union(tn1, tn_deltas)), subgraph_vs)
 end
 
-# _is_delta(t) = (t.tensor.storage.data == 1.0)
-
 function _simplify_deltas(tn::ITensorNetwork, deltas::Vector{ITensor})
   out_delta_inds = Vector{Pair}()
   network = [Vector{ITensor}(tn)..., deltas...]
@@ -147,6 +145,8 @@ function _simplify_deltas(tn::ITensorNetwork, deltas::Vector{ITensor})
   return tn, out_deltas
 end
 
+_is_delta(t) = (t.tensor.storage.data == 1.0)
+
 # remove deltas to improve the performance
 function _remove_deltas(partition::DataGraph; r=1)
   partition = copy(partition)
@@ -155,12 +155,14 @@ function _remove_deltas(partition::DataGraph; r=1)
   nonleaf_vertices = setdiff(vertices(partition), leaves)
   network = vcat([Vector{ITensor}(partition[v]) for v in nonleaf_vertices]...)
   outinds = noncommoninds(network...)
-
   all_deltas = []
   for tn_v in nonleaf_vertices
     tn = partition[tn_v]
-    deltas = [tn[v] for v in vertices(tn) if v[2] == 2]
+    deltas = [tn[v] for v in vertices(tn) if _is_delta(tn[v])]
     all_deltas = vcat(all_deltas, deltas)
+  end
+  if length(all_deltas) == 0
+    return partition
   end
   inds_list = map(t -> collect(inds(t)), all_deltas)
   deltainds = collect(Set(vcat(inds_list...)))
@@ -176,7 +178,7 @@ function _remove_deltas(partition::DataGraph; r=1)
   sim_deltainds = [root(uf, ind) for ind in deltainds]
   for tn_v in nonleaf_vertices
     tn = partition[tn_v]
-    nondelta_vertices = [v for v in vertices(tn) if v[2] == 1]
+    nondelta_vertices = [v for v in vertices(tn) if !_is_delta(tn[v])]
     new_tn = ITensorNetwork()
     for v in nondelta_vertices
       add_vertex!(new_tn, v)

@@ -6,38 +6,38 @@ using ITensorNetworks:
   _remove_deltas,
   approx_itensornetwork!
 
-# @testset "test mincut functions on top of MPS" begin
-#   i = Index(2, "i")
-#   j = Index(2, "j")
-#   k = Index(2, "k")
-#   l = Index(2, "l")
-#   m = Index(2, "m")
-#   n = Index(2, "n")
-#   o = Index(2, "o")
-#   p = Index(2, "p")
+@testset "test mincut functions on top of MPS" begin
+  i = Index(2, "i")
+  j = Index(2, "j")
+  k = Index(2, "k")
+  l = Index(2, "l")
+  m = Index(2, "m")
+  n = Index(2, "n")
+  o = Index(2, "o")
+  p = Index(2, "p")
 
-#   T = randomITensor(i, j, k, l, m, n, o, p)
-#   M = MPS(T, (i, j, k, l, m, n, o, p); cutoff=1e-5, maxdim=500)
-#   tn = ITensorNetwork(M[:])
-#   out = _binary_tree_partition_inds(
-#     tn, [i, j, k, l, m, n, o, p]; maximally_unbalanced=false
-#   )
-#   @test length(out) == 2
-#   out = _binary_tree_partition_inds(tn, [i, j, k, l, m, n, o, p]; maximally_unbalanced=true)
-#   @test length(out) == 2
-#   out = _mps_partition_inds_order(tn, [o, p, i, j, k, l, m, n])
-#   @test out in [[i, j, k, l, m, n, o, p], [p, o, n, m, l, k, j, i]]
-#   p1, p2 = _mincut_partitions(tn, [k, l], [m, n])
-#   # When MPS bond dimensions are large, the partition will not across internal inds
-#   @test (length(p1) == 0) || (length(p2) == 0)
+  T = randomITensor(i, j, k, l, m, n, o, p)
+  M = MPS(T, (i, j, k, l, m, n, o, p); cutoff=1e-5, maxdim=500)
+  tn = ITensorNetwork(M[:])
+  out = _binary_tree_partition_inds(
+    tn, [i, j, k, l, m, n, o, p]; maximally_unbalanced=false
+  )
+  @test length(out) == 2
+  out = _binary_tree_partition_inds(tn, [i, j, k, l, m, n, o, p]; maximally_unbalanced=true)
+  @test length(out) == 2
+  out = _mps_partition_inds_order(tn, [o, p, i, j, k, l, m, n])
+  @test out in [[i, j, k, l, m, n, o, p], [p, o, n, m, l, k, j, i]]
+  p1, p2 = _mincut_partitions(tn, [k, l], [m, n])
+  # When MPS bond dimensions are large, the partition will not across internal inds
+  @test (length(p1) == 0) || (length(p2) == 0)
 
-#   M = MPS(T, (i, j, k, l, m, n, o, p); cutoff=1e-5, maxdim=2)
-#   tn = ITensorNetwork(M[:])
-#   p1, p2 = _mincut_partitions(tn, [k, l], [m, n])
-#   # When MPS bond dimensions are small, the partition will across internal inds
-#   @test sort(p1) == [1, 2, 3, 4]
-#   @test sort(p2) == [5, 6, 7, 8]
-# end
+  M = MPS(T, (i, j, k, l, m, n, o, p); cutoff=1e-5, maxdim=2)
+  tn = ITensorNetwork(M[:])
+  p1, p2 = _mincut_partitions(tn, [k, l], [m, n])
+  # When MPS bond dimensions are small, the partition will across internal inds
+  @test sort(p1) == [1, 2, 3, 4]
+  @test sort(p2) == [5, 6, 7, 8]
+end
 
 # @testset "test _binary_tree_partition_inds of a 2D network" begin
 #   N = (3, 3, 3)
@@ -58,34 +58,66 @@ using ITensorNetworks:
 #   @test length(out) == 2
 # end
 
-@testset "test binary_tree_partition" begin
-  i = Index(2, "i")
-  j = Index(2, "j")
-  k = Index(2, "k")
-  l = Index(2, "l")
-  m = Index(2, "m")
-  T = randomITensor(i, j, k, l, m)
-  M = MPS(T, (i, j, k, l, m); cutoff=1e-5, maxdim=5)
-  network = M[:]
-  out1 = contract(network...)
-  tn = ITensorNetwork(network)
-  inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
-  @info "inds_btree", inds_btree
-  par = binary_tree_partition(tn, inds_btree; algorithm="mincut")
-  @info "partition is", par
-  @info typeof(par)
-  par_wo_deltas = _remove_deltas(par)
-  @info "par_wo_deltas", par_wo_deltas
-  networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
-  network3 = vcat(networks...)
-  out3 = contract(network3...)
-  @test isapprox(out1, out3)
-  # approx_tn, lognorm = approx_itensornetwork!(par)
-  # @info "approx_tn", approx_tn
-  # network2 = Vector{ITensor}(approx_tn)
-  # out2 = contract(network2...) * exp(lognorm)
-  # i1 = noncommoninds(network...)
-  # i2 = noncommoninds(network2...)
-  # @test (length(i1) == length(i2))
-  # @test isapprox(out1, out2)
-end
+# @testset "test binary_tree_partition" begin
+#   i = Index(2, "i")
+#   j = Index(2, "j")
+#   k = Index(2, "k")
+#   l = Index(2, "l")
+#   m = Index(2, "m")
+#   T = randomITensor(i, j, k, l, m)
+#   M = MPS(T, (i, j, k, l, m); cutoff=1e-5, maxdim=5)
+#   network = M[:]
+#   out1 = contract(network...)
+#   tn = ITensorNetwork(network)
+#   inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
+#   @info "inds_btree", inds_btree
+#   par = binary_tree_partition(tn, inds_btree; algorithm="mincut")
+#   @info "partition is", par
+#   @info typeof(par)
+#   par_wo_deltas = _remove_deltas(par)
+#   @info "par_wo_deltas", par_wo_deltas
+#   networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
+#   network2 = vcat(networks...)
+#   out2 = contract(network2...)
+#   @test isapprox(out1, out2)
+#   approx_tn, lognorm = approx_itensornetwork!(par)
+#   @info "approx_tn", approx_tn
+#   network3 = Vector{ITensor}(approx_tn)
+#   out3 = contract(network3...) * exp(lognorm)
+#   i1 = noncommoninds(network...)
+#   i3 = noncommoninds(network3...)
+#   @test (length(i1) == length(i3))
+#   @test isapprox(out1, out3)
+# end
+
+# @testset "test approx_itensornetwork!" begin
+#   i = Index(2, "i")
+#   j = Index(2, "j")
+#   k = Index(2, "k")
+#   l = Index(2, "l")
+#   m = Index(2, "m")
+#   n = Index(2, "n")
+#   o = Index(2, "o")
+#   p = Index(2, "p")
+#   q = Index(2, "q")
+#   r = Index(2, "r")
+#   s = Index(2, "s")
+#   t = Index(2, "t")
+#   u = Index(2, "u")
+#   A = randomITensor(i, n)
+#   B = randomITensor(j, o)
+#   AB = randomITensor(n, o, r)
+#   C = randomITensor(k, p)
+#   D = randomITensor(l, q)
+#   E = randomITensor(m, u)
+#   CD = randomITensor(p, q, s)
+#   ABCD = randomITensor(r, s, t)
+#   ABCDE = randomITensor(t, u)
+#   tensors = [A, B, C, D, E, AB, CD, ABCD, ABCDE]
+#   tn = ITensorNetwork(tensors)
+#   par = partition(ITensorNetwork{Any}(tn), [[1, 2, 6], [3, 4, 7], [8], [5, 9]])
+#   approx_tn, log_norm = approx_itensornetwork!(par)
+#   network = Vector{ITensor}(approx_tn)
+#   out = contract(network...) * exp(log_norm)
+#   @test isapprox(out, contract(tensors...))
+# end

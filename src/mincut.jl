@@ -31,8 +31,6 @@ function _mincut_partitions(
   p1, p2, cut = _mincut(tn, source_inds, terminal_inds)
   p1 = [v[1] for v in p1 if v[2] == 2]
   p2 = [v[1] for v in p2 if v[2] == 2]
-  @assert length(p1) >= 1
-  @assert length(p2) >= 1
   return p1, p2
 end
 
