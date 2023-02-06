@@ -39,85 +39,85 @@ using ITensorNetworks:
   @test sort(p2) == [5, 6, 7, 8]
 end
 
-# @testset "test _binary_tree_partition_inds of a 2D network" begin
-#   N = (3, 3, 3)
-#   linkdim = 2
-#   network = randomITensorNetwork(IndsNetwork(named_grid(N)); link_space=linkdim)
-#   tn = Array{ITensor,length(N)}(undef, N...)
-#   for v in vertices(network)
-#     tn[v...] = network[v...]
-#   end
-#   tn = ITensorNetwork(vec(tn[:, :, 1]))
-#   out = _binary_tree_partition_inds(
-#     tn, noncommoninds(Vector{ITensor}(tn)...); maximally_unbalanced=false
-#   )
-#   @test length(out) == 2
-#   out = _binary_tree_partition_inds(
-#     tn, noncommoninds(Vector{ITensor}(tn)...); maximally_unbalanced=true
-#   )
-#   @test length(out) == 2
-# end
+@testset "test _binary_tree_partition_inds of a 2D network" begin
+  N = (3, 3, 3)
+  linkdim = 2
+  network = randomITensorNetwork(IndsNetwork(named_grid(N)); link_space=linkdim)
+  tn = Array{ITensor,length(N)}(undef, N...)
+  for v in vertices(network)
+    tn[v...] = network[v...]
+  end
+  tn = ITensorNetwork(vec(tn[:, :, 1]))
+  out = _binary_tree_partition_inds(
+    tn, noncommoninds(Vector{ITensor}(tn)...); maximally_unbalanced=false
+  )
+  @test length(out) == 2
+  out = _binary_tree_partition_inds(
+    tn, noncommoninds(Vector{ITensor}(tn)...); maximally_unbalanced=true
+  )
+  @test length(out) == 2
+end
 
-# @testset "test binary_tree_partition" begin
-#   i = Index(2, "i")
-#   j = Index(2, "j")
-#   k = Index(2, "k")
-#   l = Index(2, "l")
-#   m = Index(2, "m")
-#   T = randomITensor(i, j, k, l, m)
-#   M = MPS(T, (i, j, k, l, m); cutoff=1e-5, maxdim=5)
-#   network = M[:]
-#   out1 = contract(network...)
-#   tn = ITensorNetwork(network)
-#   inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
-#   @info "inds_btree", inds_btree
-#   par = binary_tree_partition(tn, inds_btree; algorithm="mincut")
-#   @info "partition is", par
-#   @info typeof(par)
-#   par_wo_deltas = _remove_deltas(par)
-#   @info "par_wo_deltas", par_wo_deltas
-#   networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
-#   network2 = vcat(networks...)
-#   out2 = contract(network2...)
-#   @test isapprox(out1, out2)
-#   approx_tn, lognorm = approx_itensornetwork!(par)
-#   @info "approx_tn", approx_tn
-#   network3 = Vector{ITensor}(approx_tn)
-#   out3 = contract(network3...) * exp(lognorm)
-#   i1 = noncommoninds(network...)
-#   i3 = noncommoninds(network3...)
-#   @test (length(i1) == length(i3))
-#   @test isapprox(out1, out3)
-# end
+@testset "test binary_tree_partition" begin
+  i = Index(2, "i")
+  j = Index(2, "j")
+  k = Index(2, "k")
+  l = Index(2, "l")
+  m = Index(2, "m")
+  T = randomITensor(i, j, k, l, m)
+  M = MPS(T, (i, j, k, l, m); cutoff=1e-5, maxdim=5)
+  network = M[:]
+  out1 = contract(network...)
+  tn = ITensorNetwork(network)
+  inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
+  @info "inds_btree", inds_btree
+  par = binary_tree_partition(tn, inds_btree)
+  @info "partition is", par
+  @info typeof(par)
+  par_wo_deltas = _remove_deltas(par)
+  @info "par_wo_deltas", par_wo_deltas
+  networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
+  network2 = vcat(networks...)
+  out2 = contract(network2...)
+  @test isapprox(out1, out2)
+  approx_tn, lognorm = approx_itensornetwork!(par)
+  @info "approx_tn", approx_tn
+  network3 = Vector{ITensor}(approx_tn)
+  out3 = contract(network3...) * exp(lognorm)
+  i1 = noncommoninds(network...)
+  i3 = noncommoninds(network3...)
+  @test (length(i1) == length(i3))
+  @test isapprox(out1, out3)
+end
 
-# @testset "test approx_itensornetwork!" begin
-#   i = Index(2, "i")
-#   j = Index(2, "j")
-#   k = Index(2, "k")
-#   l = Index(2, "l")
-#   m = Index(2, "m")
-#   n = Index(2, "n")
-#   o = Index(2, "o")
-#   p = Index(2, "p")
-#   q = Index(2, "q")
-#   r = Index(2, "r")
-#   s = Index(2, "s")
-#   t = Index(2, "t")
-#   u = Index(2, "u")
-#   A = randomITensor(i, n)
-#   B = randomITensor(j, o)
-#   AB = randomITensor(n, o, r)
-#   C = randomITensor(k, p)
-#   D = randomITensor(l, q)
-#   E = randomITensor(m, u)
-#   CD = randomITensor(p, q, s)
-#   ABCD = randomITensor(r, s, t)
-#   ABCDE = randomITensor(t, u)
-#   tensors = [A, B, C, D, E, AB, CD, ABCD, ABCDE]
-#   tn = ITensorNetwork(tensors)
-#   par = partition(ITensorNetwork{Any}(tn), [[1, 2, 6], [3, 4, 7], [8], [5, 9]])
-#   approx_tn, log_norm = approx_itensornetwork!(par)
-#   network = Vector{ITensor}(approx_tn)
-#   out = contract(network...) * exp(log_norm)
-#   @test isapprox(out, contract(tensors...))
-# end
+@testset "test approx_itensornetwork!" begin
+  i = Index(2, "i")
+  j = Index(2, "j")
+  k = Index(2, "k")
+  l = Index(2, "l")
+  m = Index(2, "m")
+  n = Index(2, "n")
+  o = Index(2, "o")
+  p = Index(2, "p")
+  q = Index(2, "q")
+  r = Index(2, "r")
+  s = Index(2, "s")
+  t = Index(2, "t")
+  u = Index(2, "u")
+  A = randomITensor(i, n)
+  B = randomITensor(j, o)
+  AB = randomITensor(n, o, r)
+  C = randomITensor(k, p)
+  D = randomITensor(l, q)
+  E = randomITensor(m, u)
+  CD = randomITensor(p, q, s)
+  ABCD = randomITensor(r, s, t)
+  ABCDE = randomITensor(t, u)
+  tensors = [A, B, C, D, E, AB, CD, ABCD, ABCDE]
+  tn = ITensorNetwork(tensors)
+  par = partition(ITensorNetwork{Any}(tn), [[1, 2, 6], [3, 4, 7], [8], [5, 9]])
+  approx_tn, log_norm = approx_itensornetwork!(par)
+  network = Vector{ITensor}(approx_tn)
+  out = contract(network...) * exp(log_norm)
+  @test isapprox(out, contract(tensors...))
+end

@@ -73,14 +73,11 @@ function get_leaves(tree::Vector)
   return mapreduce(get_leaves, vcat, tree)
 end
 
-function line_to_tree(line::Vector)
-  if length(line) == 1 && line[1] isa Vector
-    return line[1]
+function line_network(network::Vector)
+  if length(network) <= 2
+    return network
   end
-  if length(line) <= 2
-    return line
-  end
-  return [line_to_tree(line[1:(end - 1)]), line[end]]
+  return [line_network(network[1:(end - 1)]), [network[end]]]
 end
 
 function topo_sort(tn; type=Vector, leaves=[])

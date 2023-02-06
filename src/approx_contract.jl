@@ -1,5 +1,4 @@
-using Graphs, GraphsFlows, Combinatorics, SimpleWeightedGraphs
-using GraphRecipes, Plots
+using Graphs, GraphsFlows, Combinatorics
 using OMEinsumContractionOrders
 using ITensorNetworks: contraction_sequence, TTN, IndsNetwork
 
@@ -50,12 +49,13 @@ function approximate_contract_ctree_to_tensor(
     inds_btree = inds_binary_tree(tn, nothing; algorithm=ansatz)
   end
   embedding = tree_embedding(tn, inds_btree; algorithm=algorithm)
-  tn = Vector{ITensor}(vcat(collect(values(embedding))...))
+  par = binary_tree_partition(ITensorNetwork(tn), inds_btree)
+  tn = vcat([Vector{ITensor}(par[v]) for v in vertices(par)]...)
   i2 = noncommoninds(tn...)
   @assert (length(uncontract_inds) == length(i2))
   @timeit_debug ITensors.timer "tree_approximation" begin
     return tree_approximation(
-      embedding,
+      par,
       inds_btree;
       cutoff=cutoff,
       maxdim=maxdim,
@@ -582,7 +582,8 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
     for leaf in tn_leaves
       for ig in ctree_to_igs[leaf]
         if !haskey(ig_to_linear_order, ig)
-          ig_to_linear_order[ig] = inds_linear_order(leaf, ig.data)
+          inds_order = _mps_partition_inds_order(ITensorNetwork(leaf), ig.data)
+          ig_to_linear_order[ig] = [[i] for i in inds_order]
         end
       end
     end
@@ -972,78 +973,82 @@ function approximate_contract(
 end
 
 function tree_approximation(
-  embedding::Dict,
+  par::DataGraph,
   inds_btree::Vector;
   cutoff=1e-15,
   maxdim=10000,
-  maxsize=10000,
   algorithm="density_matrix",
 )
   @assert algorithm in ["density_matrix", "density_matrix_contract_first", "svd"]
   if algorithm == "density_matrix"
-    return tree_approximation_density_matrix(
-      embedding, inds_btree; cutoff=cutoff, maxdim=maxdim, maxsize=maxsize
-    )
-  end
-  if algorithm == "density_matrix_contract_first"
-    @info "density_matrix_contract_first"
-    btree_to_contracted_tn = Dict{Vector,Vector{ITensor}}()
-    for (btree, ts) in embedding
-      btree_to_contracted_tn[btree] = [optcontract(ts)]
+    tn, log_norm = approx_itensornetwork!(par; cutoff=cutoff, maxdim=maxdim)
+    ctree_to_tensor = Dict{Vector,ITensor}()
+    iii = 1
+    for node in PreOrderDFS(inds_btree)
+      ctree_to_tensor[node] = tn[iii]
+      iii += 1
     end
-    return tree_approximation_density_matrix(
-      btree_to_contracted_tn, inds_btree; cutoff=cutoff, maxdim=maxdim, maxsize=maxsize
-    )
+    return ctree_to_tensor, log_norm
   end
-  if algorithm == "svd"
-    return tree_approximation_svd(
-      embedding, inds_btree; cutoff=cutoff, maxdim=maxdim, maxsize=maxsize
-    )
-  end
+  # if algorithm == "density_matrix_contract_first"
+  #   @info "density_matrix_contract_first"
+  #   btree_to_contracted_tn = Dict{Vector,Vector{ITensor}}()
+  #   for (btree, ts) in embedding
+  #     btree_to_contracted_tn[btree] = [optcontract(ts)]
+  #   end
+  #   return tree_approximation_density_matrix(
+  #     btree_to_contracted_tn, inds_btree; cutoff=cutoff, maxdim=maxdim
+  #   )
+  # end
+  # if algorithm == "svd"
+  #   return tree_approximation_svd(
+  #     embedding, inds_btree; cutoff=cutoff, maxdim=maxdim
+  #   )
+  # end
 end
 
-function tree_approximation_svd(
-  embedding::Dict, inds_btree::Vector; cutoff=1e-15, maxdim=10000, maxsize=10000
-)
-  @info "start tree_approximation_svd", inds_btree
-  @info "cutoff", cutoff, "maxdim", maxdim
-  network = Vector{ITensor}()
-  btree_to_order = Dict{Vector,Int}()
-  root_vertex = nothing
-  for (btree, ts) in embedding
-    # use dense to convert Diag type to dense for QR decomposition TODO: raise an error in ITensors
-    push!(network, dense(optcontract(ts)))
-    btree_to_order[btree] = length(network)
-    if btree == inds_btree
-      root_vertex = length(network)
-    end
-  end
-  @assert root_vertex != nothing
-  ttn = TTN(ITensorNetwork(network))
-  @timeit_debug ITensors.timer "truncate" begin
-    truncate_ttn = truncate(ttn; cutoff=cutoff, maxdim=maxdim, root_vertex=root_vertex)
-  end
-  out_network = [truncate_ttn[i] for i in 1:length(network)]
-  inds1 = sort(uncontractinds(out_network); lt=_index_less)
-  inds2 = sort(uncontractinds(network); lt=_index_less)
-  out_network = replaceinds(out_network, Dict(zip(inds1, inds2)))
-  root_norm = norm(out_network[root_vertex])
-  out_network[root_vertex] /= root_norm
-  ctree_to_tensor = Dict{Vector,ITensor}()
-  for node in topo_sort(inds_btree; type=Vector{<:Vector})
-    children_tensors = []
-    if !(node[1] isa Vector{<:Vector})
-      push!(children_tensors, out_network[btree_to_order[node[1]]])
-    end
-    if !(node[2] isa Vector{<:Vector})
-      push!(children_tensors, out_network[btree_to_order[node[2]]])
-    end
-    t = out_network[btree_to_order[node]]
-    if children_tensors == []
-      ctree_to_tensor[node] = t
-    else
-      ctree_to_tensor[node] = optcontract([t, children_tensors...])
-    end
-  end
-  return ctree_to_tensor, log(root_norm)
-end
+# function tree_approximation_svd(
+#   embedding::Dict, inds_btree::Vector; cutoff=1e-15, maxdim=10000
+# )
+#   @info "start tree_approximation_svd", inds_btree
+#   @info "cutoff", cutoff, "maxdim", maxdim
+#   network = Vector{ITensor}()
+#   btree_to_order = Dict{Vector,Int}()
+#   root_vertex = nothing
+#   for (btree, ts) in embedding
+#     # use dense to convert Diag type to dense for QR decomposition TODO: raise an error in ITensors
+#     push!(network, dense(optcontract(ts)))
+#     btree_to_order[btree] = length(network)
+#     if btree == inds_btree
+#       root_vertex = length(network)
+#     end
+#   end
+#   @assert root_vertex != nothing
+#   ttn = TTN(ITensorNetwork(network))
+#   @timeit_debug ITensors.timer "truncate" begin
+#     truncate_ttn = truncate(ttn; cutoff=cutoff, maxdim=maxdim, root_vertex=root_vertex)
+#   end
+#   out_network = [truncate_ttn[i] for i in 1:length(network)]
+#   inds1 = sort(uncontractinds(out_network); lt=_index_less)
+#   inds2 = sort(uncontractinds(network); lt=_index_less)
+#   out_network = replaceinds(out_network, Dict(zip(inds1, inds2)))
+#   root_norm = norm(out_network[root_vertex])
+#   out_network[root_vertex] /= root_norm
+#   ctree_to_tensor = Dict{Vector,ITensor}()
+#   for node in topo_sort(inds_btree; type=Vector{<:Vector})
+#     children_tensors = []
+#     if !(node[1] isa Vector{<:Vector})
+#       push!(children_tensors, out_network[btree_to_order[node[1]]])
+#     end
+#     if !(node[2] isa Vector{<:Vector})
+#       push!(children_tensors, out_network[btree_to_order[node[2]]])
+#     end
+#     t = out_network[btree_to_order[node]]
+#     if children_tensors == []
+#       ctree_to_tensor[node] = t
+#     else
+#       ctree_to_tensor[node] = optcontract([t, children_tensors...])
+#     end
+#   end
+#   return ctree_to_tensor, log(root_norm)
+# end

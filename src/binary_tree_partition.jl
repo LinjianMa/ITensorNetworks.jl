@@ -73,7 +73,7 @@ function _binary_partition(
   return source_tn, source_deltas, remain_tn, remain_deltas
 end
 
-function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector; algorithm)
+function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector)
   # network = Vector{ITensor}(tn)
   output_tns = Vector{ITensorNetwork}()
   output_deltas_vector = Vector{Vector{ITensor}}()
