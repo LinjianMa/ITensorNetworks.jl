@@ -50,7 +50,6 @@ function _binary_partition_with_truncate!(
   innerinds_to_sim;
   kwargs...,
 )
-  @info "root is", root
   outinds = _get_out_inds(partition)
   outinds_root = intersect(outinds, noncommoninds(Vector{ITensor}(partition[root])...))
   outinds_root_to_sim = outinds_root => [sim(ind) for ind in outinds_root]
@@ -64,9 +63,6 @@ function _binary_partition_with_truncate!(
     end
     children_density_matrices = [v_to_density_matrix[c] for c in children]
     v_network = Vector{ITensor}(partition[v])
-    @info "v", v
-    @info "v_network", length(v_network)
-    # @assert length(v_network) > 0
     v_network_sim = map(t -> replaceinds(t, innerinds_to_sim), v_network)
     if v == root
       v_network_sim = map(t -> replaceinds(t, outinds_root_to_sim), v_network_sim)
@@ -93,12 +89,12 @@ function _binary_partition_with_truncate!(
 end
 
 function approx_itensornetwork!(
-  binary_tree_partition::DataGraph; root=1, cutoff=1e-15, maxdim=10000
+  tree_partition::DataGraph; root=1, cutoff=1e-15, maxdim=10000
 )
-  @assert is_tree(binary_tree_partition)
-  tree = underlying_graph(binary_tree_partition)
+  @assert is_tree(tree_partition)
+  tree = underlying_graph(tree_partition)
   # vs = post_order_dfs_vertices(tree, root)
-  partition_wo_deltas = _remove_deltas(binary_tree_partition; r=root)
+  partition_wo_deltas = _remove_deltas(tree_partition; r=root)
   v_to_density_matrix = Dict{Union{Number,Tuple},ITensor}()
   v_to_children = Dict{Union{Number,Tuple},Vector}()
   output_tn = ITensorNetwork()
@@ -125,5 +121,13 @@ function approx_itensornetwork!(
   root_norm = norm(root_tensor)
   root_tensor /= root_norm
   output_tn[root] = root_tensor
+  # TODO: refactor out; only useful for the binary tree case: remove leaves rem_leaves
+  dfs_t = dfs_tree(output_tn, root)
+  leaves = leaf_vertices(dfs_t)
+  parents = [parent_vertex(dfs_t, leaf) for leaf in leaves]
+  for (l, p) in zip(leaves, parents)
+    output_tn[p] = output_tn[p] * output_tn[l]
+    rem_vertex!(output_tn, l)
+  end
   return output_tn, log(root_norm)
 end

@@ -81,7 +81,7 @@ function line_network(network::Vector)
 end
 
 function topo_sort(tn; type=Vector, leaves=[])
-  @timeit timer "topo_sort" begin
+  @timeit_debug ITensors.timer "topo_sort" begin
     topo_order = []
     topo_sort_dfs!(tn, topo_order, leaves, type)
     return topo_order

@@ -21,7 +21,6 @@ function approximate_contract_ctree_to_tensor(
   inds_btree=nothing;
   cutoff,
   maxdim,
-  maxsize=10^15,
   ansatz="mps",
   algorithm="density_matrix",
 )
@@ -32,7 +31,7 @@ function approximate_contract_ctree_to_tensor(
     if inds_btree == nothing
       inds_btree = [[i] for i in uncontract_inds]
     end
-    return Dict{Vector,ITensor}(inds_btree => optcontract(tn)), 0.0
+    return Dict{Vector,ITensor}(inds_btree => _optcontract(tn)), 0.0
   end
   # # cases where tn is a tree, or contains 2 disconnected trees
   # if length(innerinds) <= length(tn) - 1
@@ -48,8 +47,9 @@ function approximate_contract_ctree_to_tensor(
   if inds_btree == nothing
     inds_btree = inds_binary_tree(tn, nothing; algorithm=ansatz)
   end
-  embedding = tree_embedding(tn, inds_btree; algorithm=algorithm)
+  inds_btree = _change_leaves_type(inds_btree)
   par = binary_tree_partition(ITensorNetwork(tn), inds_btree)
+  inds_btree = _change_leaves_type_back(inds_btree)
   tn = vcat([Vector{ITensor}(par[v]) for v in vertices(par)]...)
   i2 = noncommoninds(tn...)
   @assert (length(uncontract_inds) == length(i2))
@@ -59,10 +59,23 @@ function approximate_contract_ctree_to_tensor(
       inds_btree;
       cutoff=cutoff,
       maxdim=maxdim,
-      maxsize=maxsize,
       algorithm=algorithm,
     )
   end
+end
+
+function _change_leaves_type(btree)
+  if length(btree) == 1
+    return btree[1]
+  end
+  return [_change_leaves_type(btree[1]), _change_leaves_type(btree[2])]
+end
+
+function _change_leaves_type_back(btree)
+  if !(btree isa Vector)
+    return [btree]
+  end
+  return [_change_leaves_type_back(btree[1]), _change_leaves_type_back(btree[2])]
 end
 
 function uncontractinds(tn)
@@ -885,7 +898,7 @@ function approximate_contract(
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
         tn = vcat(tn1, tn2)
-        return [optcontract(tn)], log_accumulated_norm
+        return [_optcontract(tn)], log_accumulated_norm
       end
       # caching is not used here
       if use_cache == false
@@ -985,6 +998,13 @@ function tree_approximation(
     ctree_to_tensor = Dict{Vector,ITensor}()
     iii = 1
     for node in PreOrderDFS(inds_btree)
+      if !(node isa Vector)
+        continue
+      end
+      if length(node) == 1
+        iii += 1
+        continue
+      end
       ctree_to_tensor[node] = tn[iii]
       iii += 1
     end

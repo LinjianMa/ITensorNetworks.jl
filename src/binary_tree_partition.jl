@@ -49,7 +49,6 @@ function _binary_partition(
     source_inds,
     setdiff(external_inds, source_inds),
   )
-  @info "p1 is", p1
   tn_vs = [v[1] for v in p1 if v[2] == 1]
   source_tn = subgraph(tn, tn_vs)
   delta_indices = [v[1] for v in p1 if v[2] == 2]
@@ -73,6 +72,8 @@ function _binary_partition(
   return source_tn, source_deltas, remain_tn, remain_deltas
 end
 
+# TODO: add explanation: it's better to keep leave nodes in the partition since 
+# we can remove more deltas in `_remove_deltas`, which is more efficient.
 function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector)
   # network = Vector{ITensor}(tn)
   output_tns = Vector{ITensorNetwork}()
@@ -80,23 +81,21 @@ function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector)
   btree_to_input_tn_deltas = Dict{Union{Vector,Index},Tuple}()
   btree_to_input_tn_deltas[inds_btree] = (tn, Vector{ITensor}())
   for node in PreOrderDFS(inds_btree)
-    @info "node is", node
     @assert haskey(btree_to_input_tn_deltas, node)
     input_tn, input_deltas = btree_to_input_tn_deltas[node]
-    # @info "node", node
     if node isa Index
       push!(output_tns, input_tn)
       push!(output_deltas_vector, input_deltas)
       continue
     end
-    tn1, deltas1, tn2, deltas2 = _binary_partition(
+    tn1, deltas1, input_tn, input_deltas = _binary_partition(
       input_tn, input_deltas, collect(Leaves(node[1]))
     )
     btree_to_input_tn_deltas[node[1]] = (tn1, deltas1)
-    tn1, deltas1, tn2, deltas2 = _binary_partition(tn2, deltas2, collect(Leaves(node[2])))
+    tn1, deltas1, input_tn, input_deltas = _binary_partition(input_tn, input_deltas, collect(Leaves(node[2])))
     btree_to_input_tn_deltas[node[2]] = (tn1, deltas1)
-    push!(output_tns, tn2)
-    push!(output_deltas_vector, deltas2)
+    push!(output_tns, input_tn)
+    push!(output_deltas_vector, input_deltas)
     # @info "btree_to_output_tn[node]", btree_to_output_tn[node]
   end
   # form subgraph_vertices
