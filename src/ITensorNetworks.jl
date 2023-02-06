@@ -109,6 +109,7 @@ include(joinpath("treetensornetworks", "solvers", "contract.jl"))
 include(joinpath("treetensornetworks", "solvers", "linsolve.jl"))
 include(joinpath("treetensornetworks", "solvers", "tree_sweeping.jl"))
 include("approx_itensornetwork.jl")
+include("approx_contract.jl")
 
 include("exports.jl")
 
