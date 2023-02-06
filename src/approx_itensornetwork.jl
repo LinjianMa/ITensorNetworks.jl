@@ -62,6 +62,7 @@ function _binary_partition_with_truncate!(
     end
     children_density_matrices = [v_to_density_matrix[c] for c in children]
     v_network = Vector{ITensor}(partition[v])
+    @assert length(v_network) > 0
     v_network_sim = map(t -> replaceinds(t, innerinds_to_sim), v_network)
     if v == root
       v_network_sim = map(t -> replaceinds(t, outinds_root_to_sim), v_network_sim)

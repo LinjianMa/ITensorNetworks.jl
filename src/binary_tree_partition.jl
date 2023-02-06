@@ -140,7 +140,6 @@ function _simplify_deltas(tn::ITensorNetwork, deltas::Vector{ITensor})
       connect(uf, i1, i2)
     end
   end
-  sim_dict = Dict([ind => root(uf, ind) for ind in deltainds])
   tn = map_data(
     t -> replaceinds(t, deltainds => [root(uf, i) for i in deltainds]), tn; edges=[]
   )
@@ -148,32 +147,42 @@ function _simplify_deltas(tn::ITensorNetwork, deltas::Vector{ITensor})
   return tn, out_deltas
 end
 
-# # remove deltas to improve the performance
-# function remove_deltas(tnets_dict::Dict)
-#   # only remove deltas in intermediate nodes
-#   ks = filter(k -> (length(k) > 1), collect(keys(tnets_dict)))
-#   network = vcat([tnets_dict[k] for k in ks]...)
-#   # outinds will always be the roots in union-find
-#   outinds = noncommoninds(network...)
+# remove deltas to improve the performance
+function _remove_deltas(partition::DataGraph; r=1)
+  partition = copy(partition)
+  leaves = leaf_vertices(dfs_tree(partition, r))
+  # only remove deltas in intermediate vertices
+  nonleaf_vertices = setdiff(vertices(partition), leaves)
+  network = vcat([Vector{ITensor}(partition[v]) for v in nonleaf_vertices]...)
+  outinds = noncommoninds(network...)
 
-#   deltas = filter(t -> _is_delta(t), network)
-#   inds_list = map(t -> collect(inds(t)), deltas)
-#   deltainds = collect(Set(vcat(inds_list...)))
-#   uf = UF(deltainds)
-#   for t in deltas
-#     i1, i2 = inds(t)
-#     if root(uf, i1) in outinds
-#       connect(uf, i2, i1)
-#     else
-#       connect(uf, i1, i2)
-#     end
-#   end
-#   sim_dict = Dict([ind => root(uf, ind) for ind in deltainds])
-#   for k in ks
-#     net = tnets_dict[k]
-#     net = setdiff(net, deltas)
-#     tnets_dict[k] = replaceinds(net, sim_dict)
-#     # @info "$(k), $(TreeTensor(net...))"
-#   end
-#   return tnets_dict
-# end
+  all_deltas = []
+  for tn_v in nonleaf_vertices
+    tn = partition[tn_v]
+    deltas = [tn[v] for v in vertices(tn) if v[2] == 2]
+    all_deltas = vcat(all_deltas, deltas)
+  end
+  inds_list = map(t -> collect(inds(t)), all_deltas)
+  deltainds = collect(Set(vcat(inds_list...)))
+  uf = UF(deltainds)
+  for t in all_deltas
+    i1, i2 = inds(t)
+    if root(uf, i1) in outinds
+      connect(uf, i2, i1)
+    else
+      connect(uf, i1, i2)
+    end
+  end
+  sim_deltainds = [root(uf, ind) for ind in deltainds]
+  for tn_v in nonleaf_vertices
+    tn = partition[tn_v]
+    nondelta_vertices = [v for v in vertices(tn) if v[2] == 1]
+    new_tn = ITensorNetwork()
+    for v in nondelta_vertices
+      add_vertex!(new_tn, v)
+      new_tn[v] = replaceinds(tn[v], deltainds, sim_deltainds)
+    end
+    partition[tn_v] = new_tn
+  end
+  return partition
+end
