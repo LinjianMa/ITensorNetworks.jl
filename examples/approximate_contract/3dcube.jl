@@ -334,12 +334,12 @@ end
 # )
 @time bench_3d_cube_lnZ(
   (6, 6, 6);
-  block_size=(6, 1, 1),
+  block_size=(1, 1, 1),
   beta=0.3,
   h=0.0,
   num_iter=2,
   cutoff=1e-12,
-  maxdim=128,
+  maxdim=64,
   ansatz="mps",
   algorithm="density_matrix",
   snake=false,

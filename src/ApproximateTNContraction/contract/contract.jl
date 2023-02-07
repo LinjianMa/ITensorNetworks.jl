@@ -1136,9 +1136,11 @@ function tree_approximation_density_matrix(
     end
     # update children
     subenvtensor = optcontract([env, netbra...])
-    envnet = [subenvtensor, closednet(tree[2]), netket...]
+    subenvtensor2 = optcontract([closednet(tree[2]), netket...])
+    envnet = [subenvtensor, subenvtensor2]
+    # envnet = [subenvtensor, closednet(tree[2]), netket...]
     ind1_pair, subnetsq1, subnet1 = insert_projectors(tree[1], optcontract(envnet))
-    envnet = [subenvtensor, subnetsq1, netket...]
+    envnet = [subenvtensor, optcontract([subnetsq1, netket...])]
     ind2_pair, _, subnet2 = insert_projectors(tree[2], optcontract(envnet))
     # compute the projector
     rinds = (ind1_pair[1], ind2_pair[1])
