@@ -4,6 +4,7 @@ using AbstractTrees
 using Combinatorics
 using Compat
 using DataGraphs
+using DataStructures
 using Dictionaries
 using DocStringExtensions
 using Graphs

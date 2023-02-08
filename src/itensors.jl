@@ -41,3 +41,13 @@ trivial_space(x::Index) = _trivial_space(x)
 trivial_space(x::Vector{<:Index}) = _trivial_space(x)
 trivial_space(x::ITensor) = trivial_space(inds(x))
 trivial_space(x::Tuple{Vararg{Index}}) = trivial_space(first(x))
+
+function ITensors.replaceinds(tensor::ITensor, sim_dict::Dict{<:Index,<:Index})
+  indices = collect(keys(sim_dict))
+    sim_inds = [ind for ind in inds(tensor) if ind in indices]
+    if (length(sim_inds) == 0)
+      return tensor
+    end
+    outinds = map(i -> sim_dict[i], sim_inds)
+    return replaceinds(tensor, sim_inds => outinds)
+end

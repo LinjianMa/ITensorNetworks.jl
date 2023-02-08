@@ -27,7 +27,7 @@ struct _DensityMartrixAlgGraph
   partition::DataGraph
   out_tree::NamedGraph
   root::Union{<:Number,Tuple}
-  innerinds_to_sim::Pair{Vector,Vector}
+  innerinds_to_sim::Dict{<:Index,<:Index}
   caches::_DensityMatrixAlgCaches
 end
 
@@ -37,7 +37,11 @@ function _DensityMartrixAlgGraph(
   innerinds = _get_inner_inds(partition)
   sim_innerinds = [sim(ind) for ind in innerinds]
   return _DensityMartrixAlgGraph(
-    partition, out_tree, root, innerinds => sim_innerinds, _DensityMatrixAlgCaches()
+    partition,
+    out_tree,
+    root,
+    Dict(zip(innerinds, sim_innerinds)),
+    _DensityMatrixAlgCaches(),
   )
 end
 
@@ -87,13 +91,13 @@ end
 function _densitymatrix_outinds_to_sim(partition, root)
   outinds = _get_out_inds(partition)
   outinds_root = intersect(outinds, noncommoninds(Vector{ITensor}(partition[root])...))
-  outinds_root_to_sim = outinds_root => [sim(ind) for ind in outinds_root]
+  outinds_root_to_sim = Dict(zip(outinds_root, [sim(ind) for ind in outinds_root]))
   return outinds_root_to_sim
 end
 
-function _sim(partial_dm_tensor::ITensor, indices, simindices)
-  inds_to_siminds = Dict(zip(indices, simindices))
-  siminds_to_inds = Dict(zip(simindices, indices))
+function _sim(partial_dm_tensor::ITensor, inds_to_siminds)
+  siminds_to_inds = Dict(zip(values(inds_to_siminds), keys(inds_to_siminds)))
+  indices = keys(inds_to_siminds)
   indices = intersect(indices, inds(partial_dm_tensor))
   simindices = setdiff(inds(partial_dm_tensor), indices)
   reorder_inds = [indices..., simindices...]
@@ -136,13 +140,13 @@ function _update!(
     (child_v, dm_tensor) in child_to_dm
   ]
   if length(cpdms) == 0
-    sim_network = Vector{ITensor}(map(t -> replaceinds(t, inds_to_sim), network))
+    sim_network = map(x -> replaceinds(x, inds_to_sim), network)
     density_matrix = _optcontract([network..., sim_network...])
   elseif length(cpdms) == 1
-    sim_network = Vector{ITensor}(map(t -> replaceinds(t, inds_to_sim), network))
+    sim_network = map(x -> replaceinds(x, inds_to_sim), network)
     density_matrix = _optcontract([cpdms[1].tensor, sim_network...])
   else
-    simtensor = _sim(cpdms[2].tensor, inds_to_sim.first, inds_to_sim.second)
+    simtensor = _sim(cpdms[2].tensor, inds_to_sim)
     density_matrix = _optcontract([cpdms[1].tensor, simtensor])
   end
   caches.v_to_cdm[v] = _DensityMatrix(density_matrix, children)
@@ -153,9 +157,7 @@ end
 function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   caches = alg_graph.caches
   outinds_root_to_sim = _densitymatrix_outinds_to_sim(alg_graph.partition, root)
-  inds_to_sim =
-    [alg_graph.innerinds_to_sim.first..., outinds_root_to_sim.first...] =>
-      [alg_graph.innerinds_to_sim.second..., outinds_root_to_sim.second...]
+  inds_to_sim = merge(alg_graph.innerinds_to_sim, outinds_root_to_sim)
   dm_dfs_tree = dfs_tree(alg_graph.out_tree, root)
   @assert length(child_vertices(dm_dfs_tree, root)) == 1
   for v in post_order_dfs_vertices(dm_dfs_tree, root)
@@ -166,8 +168,8 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   end
   U = _get_low_rank_projector(
     caches.v_to_cdm[root].tensor,
-    outinds_root_to_sim.second,
-    outinds_root_to_sim.first;
+    collect(values(outinds_root_to_sim)),
+    collect(keys(outinds_root_to_sim));
     kwargs...,
   )
   # update partition and tree
@@ -185,7 +187,7 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   )
   @assert length(caches.v_to_cpdms[new_root]) <= 1
   caches.v_to_cpdms[new_root] = [
-    _PartialDensityMatrix(cpdm.tensor * root_tensor, cpdm.child) for
+    _PartialDensityMatrix(_optcontract([cpdm.tensor, root_tensor]), cpdm.child) for
     cpdm in caches.v_to_cpdms[new_root]
   ]
   return U
@@ -235,7 +237,7 @@ function _rem_leaf_vertices!(tn::ITensorNetwork, root)
   leaves = leaf_vertices(dfs_t)
   parents = [parent_vertex(dfs_t, leaf) for leaf in leaves]
   for (l, p) in zip(leaves, parents)
-    tn[p] = tn[p] * tn[l]
+    tn[p] = _optcontract([tn[p], tn[l]])
     rem_vertex!(tn, l)
   end
 end

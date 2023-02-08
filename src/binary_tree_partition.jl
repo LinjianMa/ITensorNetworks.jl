@@ -1,36 +1,26 @@
-struct UF
-  parent_map::Dict
+
+function _introot_union!(s, x, y; left_root=true)
+  parents = s.parents
+  rks = s.ranks
+  @inbounds xrank = rks[x]
+  @inbounds yrank = rks[y]
+  if !left_root
+    x, y = y, x
+  end
+  @inbounds parents[y] = x
+  s.ngroups -= 1
+  return x
 end
 
-function UF(values::Vector)
-  parent_map = Dict()
-  for value in values
-    parent_map[value] = value
-  end
-  return UF(parent_map)
-end
-
-function root(uf::UF, n)
-  while uf.parent_map[n] != n
-    n = uf.parent_map[n]
-  end
-  return n
-end
-
-function connect(uf, n1, n2)
-  rootn1 = root(uf, n1)
-  rootn2 = root(uf, n2)
-  if rootn1 == rootn2
-    # Already connected
-    return nothing
-  end
-  return uf.parent_map[rootn1] = rootn2
+function _root_union!(s, x, y; left_root=true)
+  return s.revmap[_introot_union!(s.internal, s.intmap[x], s.intmap[y]; left_root=true)]
 end
 
 """
 partition the input network containing both tn and deltas (a vector of delta tensors) into two partitions,
 one adjacent to source_inds and the other adjacent to other external inds of the network.
 """
+# TODO: rewrite replaceinds
 function _binary_partition(
   tn::ITensorNetwork, deltas::Vector{ITensor}, source_inds::Vector{<:Index}
 )
@@ -92,7 +82,9 @@ function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector)
       input_tn, input_deltas, collect(Leaves(node[1]))
     )
     btree_to_input_tn_deltas[node[1]] = (tn1, deltas1)
-    tn1, deltas1, input_tn, input_deltas = _binary_partition(input_tn, input_deltas, collect(Leaves(node[2])))
+    tn1, deltas1, input_tn, input_deltas = _binary_partition(
+      input_tn, input_deltas, collect(Leaves(node[2]))
+    )
     btree_to_input_tn_deltas[node[2]] = (tn1, deltas1)
     push!(output_tns, input_tn)
     push!(output_deltas_vector, input_deltas)
@@ -125,20 +117,20 @@ function _simplify_deltas(tn::ITensorNetwork, deltas::Vector{ITensor})
   outinds = noncommoninds(network...)
   inds_list = map(t -> collect(inds(t)), deltas)
   deltainds = collect(Set(vcat(inds_list...)))
-  uf = UF(deltainds)
+  ds = DisjointSets(deltainds)
   for t in deltas
     i1, i2 = inds(t)
-    if root(uf, i1) in outinds && root(uf, i2) in outinds
-      push!(out_delta_inds, root(uf, i1) => root(uf, i2))
+    if find_root!(ds, i1) in outinds && find_root!(ds, i2) in outinds
+      push!(out_delta_inds, find_root!(ds, i1) => find_root!(ds, i2))
     end
-    if root(uf, i1) in outinds
-      connect(uf, i2, i1)
+    if find_root!(ds, i1) in outinds
+      _root_union!(ds, find_root!(ds, i1), find_root!(ds, i2))
     else
-      connect(uf, i1, i2)
+      _root_union!(ds, find_root!(ds, i2), find_root!(ds, i1))
     end
   end
   tn = map_data(
-    t -> replaceinds(t, deltainds => [root(uf, i) for i in deltainds]), tn; edges=[]
+    t -> replaceinds(t, deltainds => [find_root!(ds, i) for i in deltainds]), tn; edges=[]
   )
   out_deltas = Vector{ITensor}([delta(i.first, i.second) for i in out_delta_inds])
   return tn, out_deltas
@@ -165,16 +157,16 @@ function _remove_deltas(partition::DataGraph; r=1)
   end
   inds_list = map(t -> collect(inds(t)), all_deltas)
   deltainds = collect(Set(vcat(inds_list...)))
-  uf = UF(deltainds)
+  ds = DisjointSets(deltainds)
   for t in all_deltas
     i1, i2 = inds(t)
-    if root(uf, i1) in outinds
-      connect(uf, i2, i1)
+    if find_root!(ds, i1) in outinds
+      _root_union!(ds, find_root!(ds, i1), find_root!(ds, i2))
     else
-      connect(uf, i1, i2)
+      _root_union!(ds, find_root!(ds, i2), find_root!(ds, i1))
     end
   end
-  sim_deltainds = [root(uf, ind) for ind in deltainds]
+  sim_deltainds = [find_root!(ds, ind) for ind in deltainds]
   for tn_v in nonleaf_vertices
     tn = partition[tn_v]
     nondelta_vertices = [v for v in vertices(tn) if !_is_delta(tn[v])]
