@@ -222,7 +222,7 @@ function approx_itensornetwork!(
   @assert is_tree(binary_tree_partition)
   @assert root in vertices(binary_tree_partition)
   # TODO: explain this
-  partition_wo_deltas = _remove_deltas(binary_tree_partition; r=root)
+  partition_wo_deltas = _remove_inner_deltas(binary_tree_partition; r=root)
   return approx_itensornetwork!(
     partition_wo_deltas,
     underlying_graph(binary_tree_partition);
@@ -240,4 +240,48 @@ function _rem_leaf_vertices!(tn::ITensorNetwork, root)
     tn[p] = _optcontract([tn[p], tn[l]])
     rem_vertex!(tn, l)
   end
+end
+
+_is_delta(t) = (t.tensor.storage.data == 1.0)
+
+# remove deltas to improve the performance
+function _remove_inner_deltas(partition::DataGraph; r=1)
+  partition = copy(partition)
+  leaves = leaf_vertices(dfs_tree(partition, r))
+  # only remove deltas in intermediate vertices
+  nonleaf_vertices = setdiff(vertices(partition), leaves)
+  network = vcat([Vector{ITensor}(partition[v]) for v in nonleaf_vertices]...)
+  outinds = noncommoninds(network...)
+  all_deltas = []
+  for tn_v in nonleaf_vertices
+    tn = partition[tn_v]
+    deltas = [tn[v] for v in vertices(tn) if _is_delta(tn[v])]
+    all_deltas = vcat(all_deltas, deltas)
+  end
+  if length(all_deltas) == 0
+    return partition
+  end
+  inds_list = map(t -> collect(inds(t)), all_deltas)
+  deltainds = collect(Set(vcat(inds_list...)))
+  ds = DisjointSets(deltainds)
+  for t in all_deltas
+    i1, i2 = inds(t)
+    if find_root!(ds, i1) in outinds
+      _root_union!(ds, find_root!(ds, i1), find_root!(ds, i2))
+    else
+      _root_union!(ds, find_root!(ds, i2), find_root!(ds, i1))
+    end
+  end
+  sim_deltainds = [find_root!(ds, ind) for ind in deltainds]
+  for tn_v in nonleaf_vertices
+    tn = partition[tn_v]
+    nondelta_vertices = [v for v in vertices(tn) if !_is_delta(tn[v])]
+    new_tn = ITensorNetwork()
+    for v in nondelta_vertices
+      add_vertex!(new_tn, v)
+      new_tn[v] = replaceinds(tn[v], deltainds, sim_deltainds)
+    end
+    partition[tn_v] = new_tn
+  end
+  return partition
 end
