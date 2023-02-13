@@ -60,16 +60,12 @@ function _get_out_inds(partition::DataGraph)
 end
 
 function _optcontract(network::Vector)
-  @timeit_debug ITensors.timer "[densitymatrxalg]: _optcontract" begin
+  @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: _optcontract" begin
     if length(network) == 0
       return ITensor(1.0)
     end
     @assert network isa Vector{ITensor}
-    # @info "start contract, size is", size(network)
-    # for t in network
-    #   @info "size of t is", size(t)
-    # end
-    @timeit_debug ITensors.timer "[densitymatrxalg]: contraction_sequence" begin
+    @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: contraction_sequence" begin
       seq = contraction_sequence(network; alg="sa_bipartite")
     end
     output = contract(network; sequence=seq)
@@ -80,7 +76,7 @@ end
 function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
   t00 = time()
   @info "eigen input size", size(tensor)
-  @timeit_debug ITensors.timer "[densitymatrxalg]: eigen" begin
+  @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
     diag, U = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
   end
   t11 = time() - t00
@@ -193,46 +189,13 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   return U
 end
 
-function approx_itensornetwork!(
-  partition::DataGraph, out_tree::NamedGraph; root=1, cutoff=1e-15, maxdim=10000
-)
-  @assert sort(vertices(partition)) == sort(vertices(out_tree))
-  alg_graph = _DensityMartrixAlgGraph(partition, out_tree, root)
-  output_tn = ITensorNetwork()
-  for approx_v in post_order_dfs_vertices(out_tree, root)[1:(end - 1)]
-    U = _rem_vertex!(alg_graph, approx_v; cutoff=cutoff, maxdim=maxdim)
-    # update output_tn
-    add_vertex!(output_tn, approx_v)
-    output_tn[approx_v] = U
-  end
-  @assert length(vertices(partition)) == 1
-  add_vertex!(output_tn, root)
-  root_tensor = _optcontract(Vector{ITensor}(partition[root]))
-  root_norm = norm(root_tensor)
-  root_tensor /= root_norm
-  output_tn[root] = root_tensor
-  # TODO: only useful for the binary tree case
-  _rem_leaf_vertices!(output_tn, root)
-  return output_tn, log(root_norm)
-end
-
-function approx_itensornetwork!(
-  binary_tree_partition::DataGraph; root=1, cutoff=1e-15, maxdim=10000
-)
-  @assert is_tree(binary_tree_partition)
-  @assert root in vertices(binary_tree_partition)
-  # TODO: explain this
-  partition_wo_deltas = _remove_inner_deltas(binary_tree_partition; r=root)
-  return approx_itensornetwork!(
-    partition_wo_deltas,
-    underlying_graph(binary_tree_partition);
-    root=root,
-    cutoff=cutoff,
-    maxdim=maxdim,
-  )
-end
-
-function _rem_leaf_vertices!(tn::ITensorNetwork, root)
+"""
+For a given ITensorNetwork `tn` and a `root` vertex, remove leaf vertices in the directed tree
+with root `root` without changing the tensor represented by tn.
+In particular, the tensor of each leaf vertex is contracted with the tensor of its parent vertex
+to keep the tensor unchanged.
+"""
+function _rem_leaf_vertices!(tn::ITensorNetwork; root=1)
   dfs_t = dfs_tree(tn, root)
   leaves = leaf_vertices(dfs_t)
   parents = [parent_vertex(dfs_t, leaf) for leaf in leaves]
@@ -248,10 +211,11 @@ _is_delta(t) = (t.tensor.storage.data == 1.0)
 function _remove_inner_deltas(partition::DataGraph; r=1)
   partition = copy(partition)
   leaves = leaf_vertices(dfs_tree(partition, r))
-  # only remove deltas in intermediate vertices
+  # We only remove deltas in non-leaf vertices
   nonleaf_vertices = setdiff(vertices(partition), leaves)
-  network = vcat([Vector{ITensor}(partition[v]) for v in nonleaf_vertices]...)
-  outinds = noncommoninds(network...)
+  # network = vcat([Vector{ITensor}(partition[v]) for v in nonleaf_vertices]...)
+  # outinds = noncommoninds(network...)
+  outinds = _get_out_inds(subgraph(partition, nonleaf_vertices))
   all_deltas = []
   for tn_v in nonleaf_vertices
     tn = partition[tn_v]
@@ -284,4 +248,83 @@ function _remove_inner_deltas(partition::DataGraph; r=1)
     partition[tn_v] = new_tn
   end
   return partition
+end
+
+"""
+Approximate a `partition` into an output ITensorNetwork
+with the binary tree structure defined by `out_tree`.
+"""
+function _approx_binary_tree_itensornetwork!(
+  partition::DataGraph, out_tree::NamedGraph; root=1, cutoff=1e-15, maxdim=10000
+)
+  @assert sort(vertices(partition)) == sort(vertices(out_tree))
+  alg_graph = _DensityMartrixAlgGraph(partition, out_tree, root)
+  output_tn = ITensorNetwork()
+  for v in post_order_dfs_vertices(out_tree, root)[1:(end - 1)]
+    U = _rem_vertex!(alg_graph, v; cutoff=cutoff, maxdim=maxdim)
+    add_vertex!(output_tn, v)
+    output_tn[v] = U
+  end
+  @assert length(vertices(partition)) == 1
+  add_vertex!(output_tn, root)
+  root_tensor = _optcontract(Vector{ITensor}(partition[root]))
+  root_norm = norm(root_tensor)
+  root_tensor /= root_norm
+  output_tn[root] = root_tensor
+  return output_tn, log(root_norm)
+end
+
+"""
+Approximate a `binary_tree_partition` into an output ITensorNetwork
+with the same binary tree structure. `root` is the root vertex of the
+pre-order depth-first-search traversal used to perform the truncations.
+"""
+function _approx_binary_tree_itensornetwork(
+  binary_tree_partition::DataGraph; root=1, cutoff=1e-15, maxdim=10000
+)
+  @assert is_tree(binary_tree_partition)
+  @assert root in vertices(binary_tree_partition)
+  # The `binary_tree_partition` may contain multiple delta tensors to make sure
+  # the partition has a binary tree structure. These delta tensors could hurt the
+  # performance when computing density matrices so we remove them first.
+  partition_wo_deltas = _remove_inner_deltas(binary_tree_partition; r=root)
+  return _approx_binary_tree_itensornetwork!(
+    partition_wo_deltas,
+    underlying_graph(binary_tree_partition);
+    root=root,
+    cutoff=cutoff,
+    maxdim=maxdim,
+  )
+end
+
+"""
+Approximate a given ITensorNetwork `tn` into an output ITensorNetwork with a binary tree structure.
+The binary tree structure automatically chosen based on `_binary_tree_partition_inds`.
+If `maximally_unbalanced=true``, the binary tree will have a line/mps structure.
+"""
+function approx_binary_tree_itensornetwork(
+  tn::ITensorNetwork; cutoff=1e-15, maxdim=10000, maximally_unbalanced=false
+)
+  inds_btree = _binary_tree_partition_inds(
+    tn, nothing; maximally_unbalanced=maximally_unbalanced
+  )
+  return approx_binary_tree_itensornetwork(tn, inds_btree; cutoff=cutoff, maxdim=maxdim)
+end
+
+"""
+Approximate a given ITensorNetwork `tn` into an output ITensorNetwork with a binary tree structure.
+The binary tree structure is defined based on `inds_btree`, which is a nested vector of indices.
+"""
+function approx_binary_tree_itensornetwork(
+  tn::ITensorNetwork, inds_btree::Vector; cutoff=1e-15, maxdim=10000
+)
+  par = binary_tree_partition(tn, inds_btree)
+  output_tn, log_root_norm = _approx_binary_tree_itensornetwork(
+    par; root=1, cutoff=cutoff, maxdim=maxdim
+  )
+  # Each leaf vertex in `output_tn` is adjacent to one output index.
+  # We remove these leaf vertices so that each non-root vertex in `output_tn`
+  # is an order 3 tensor.
+  _rem_leaf_vertices!(output_tn; root=1)
+  return output_tn, log_root_norm
 end

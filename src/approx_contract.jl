@@ -994,7 +994,8 @@ function tree_approximation(
 )
   @assert algorithm in ["density_matrix", "density_matrix_contract_first", "svd"]
   if algorithm == "density_matrix"
-    tn, log_norm = approx_itensornetwork!(par; cutoff=cutoff, maxdim=maxdim)
+    tn, log_norm = _approx_binary_tree_itensornetwork(par; cutoff=cutoff, maxdim=maxdim)
+    _rem_leaf_vertices!(tn; root=1)
     ctree_to_tensor = Dict{Vector,ITensor}()
     iii = 1
     for node in PreOrderDFS(inds_btree)

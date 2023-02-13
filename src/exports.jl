@@ -100,7 +100,7 @@ export AbstractITensorNetwork,
 export binary_tree_partition
 
 # ITensorNetworks: approx_itensornetwork.jl
-export approx_itensornetwork!
+export approx_binary_tree_itensornetwork
 
 # ITensorNetworks: lattices.jl
 # TODO: DELETE

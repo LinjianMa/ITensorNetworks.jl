@@ -4,7 +4,7 @@ using ITensorNetworks:
   _mps_partition_inds_order,
   _mincut_partitions,
   _remove_inner_deltas,
-  approx_itensornetwork!
+  _approx_binary_tree_itensornetwork
 
 @testset "test mincut functions on top of MPS" begin
   i = Index(2, "i")
@@ -58,7 +58,7 @@ end
   @test length(out) == 2
 end
 
-@testset "test binary_tree_partition" begin
+@testset "test binary_tree_partition and approx_binary_tree_itensornetwork" begin
   i = Index(2, "i")
   j = Index(2, "j")
   k = Index(2, "k")
@@ -70,13 +70,14 @@ end
   out1 = contract(network...)
   tn = ITensorNetwork(network)
   inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
-  par = binary_tree_partition(tn, inds_btree)
-  par_wo_deltas = _remove_inner_deltas(par)
+  # test _remove_inner_deltas
+  par_wo_deltas = _remove_inner_deltas(binary_tree_partition(tn, inds_btree))
   networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
   network2 = vcat(networks...)
   out2 = contract(network2...)
   @test isapprox(out1, out2)
-  approx_tn, lognorm = approx_itensornetwork!(par)
+  # test approx_binary_tree_itensornetwork
+  approx_tn, lognorm = approx_binary_tree_itensornetwork(tn, inds_btree)
   network3 = Vector{ITensor}(approx_tn)
   out3 = contract(network3...) * exp(lognorm)
   i1 = noncommoninds(network...)
@@ -85,7 +86,7 @@ end
   @test isapprox(out1, out3)
 end
 
-@testset "test approx_itensornetwork!" begin
+@testset "test _approx_binary_tree_itensornetwork" begin
   i = Index(2, "i")
   j = Index(2, "j")
   k = Index(2, "k")
@@ -111,7 +112,7 @@ end
   tensors = [A, B, C, D, E, AB, CD, ABCD, ABCDE]
   tn = ITensorNetwork(tensors)
   par = partition(ITensorNetwork{Any}(tn), [[1, 2, 6], [3, 4, 7], [8], [5, 9]])
-  approx_tn, log_norm = approx_itensornetwork!(par)
+  approx_tn, log_norm = _approx_binary_tree_itensornetwork(par)
   network = Vector{ITensor}(approx_tn)
   out = contract(network...) * exp(log_norm)
   @test isapprox(out, contract(tensors...))
