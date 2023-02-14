@@ -214,9 +214,13 @@ function _optcontract(network::Vector)
 end
 
 function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
+  t00 = time()
+  @info "eigen input size", size(tensor)
   @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
     diag, U = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
   end
+  t11 = time() - t00
+  @info "size of U", size(U), "size of diag", size(diag), "costs", t11
   return U
 end
 
