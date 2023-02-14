@@ -3,7 +3,7 @@ using ITensorNetworks:
   _binary_tree_partition_inds,
   _mps_partition_inds_order,
   _mincut_partitions,
-  _remove_inner_deltas,
+  _remove_non_leaf_deltas,
   _approx_binary_tree_itensornetwork
 
 @testset "test mincut functions on top of MPS" begin
@@ -70,8 +70,8 @@ end
   out1 = contract(network...)
   tn = ITensorNetwork(network)
   inds_btree = _binary_tree_partition_inds(tn, [i, j, k, l, m]; maximally_unbalanced=false)
-  # test _remove_inner_deltas
-  par_wo_deltas = _remove_inner_deltas(binary_tree_partition(tn, inds_btree))
+  # test _remove_non_leaf_deltas
+  par_wo_deltas = _remove_non_leaf_deltas(binary_tree_partition(tn, inds_btree))
   networks = [Vector{ITensor}(par_wo_deltas[v]) for v in vertices(par_wo_deltas)]
   network2 = vcat(networks...)
   out2 = contract(network2...)
