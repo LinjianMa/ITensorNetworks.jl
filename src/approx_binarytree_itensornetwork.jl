@@ -216,6 +216,7 @@ end
 function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
   t00 = time()
   @info "eigen input size", size(tensor)
+  @assert length(inds(tensor)) <= 4
   @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
     diag, U = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
   end
@@ -424,13 +425,18 @@ function _remove_non_leaf_deltas(partition::DataGraph; root=1)
       _root_union!(ds, find_root!(ds, i2), find_root!(ds, i1))
     end
   end
-  sim_deltainds = [find_root!(ds, ind) for ind in deltainds]
+  deltainds_to_sim = Dict(zip(deltainds, [find_root!(ds, ind) for ind in deltainds]))
   for tn_v in nonleaf_vertices
     tn = partition[tn_v]
     nondelta_vertices = [v for v in vertices(tn) if !_is_delta(tn[v])]
     tn = subgraph(tn, nondelta_vertices)
+    partition[tn_v] = map_data(t -> replaceinds(t, deltainds_to_sim), tn; edges=[])
+  end
+  # Note: we also need to change inds in the leaves since they can be connected by deltas
+  # in nonleaf vertices
+  for tn_v in leaves
     partition[tn_v] = map_data(
-      t -> replaceinds(t, deltainds => sim_deltainds), tn; edges=[]
+      t -> replaceinds(t, deltainds_to_sim), partition[tn_v]; edges=[]
     )
   end
   return partition
