@@ -1,9 +1,10 @@
-using ITensors, Graphs
+using ITensors, Graphs, Distributions, Random
 using TimerOutputs
 using KaHyPar
 using ITensorNetworks
 using ITensorNetworks: contraction_sequence, ITensorNetwork, ising_network, vertex_tag
 using ITensorNetworks: approximate_contract, line_to_tree, line_network
+using ITensorNetworks: @count_ops
 
 INDEX = 0
 
@@ -28,17 +29,25 @@ function contract_log_norm(tn, seq)
   end
 end
 
-function exact_contract(N; beta, sc_target)
+function exact_ising_contract(N; beta, sc_target)
+  return exact_contract(N, ising_network(named_grid(N), beta); sc_target)
+end
+
+function exact_uniform_random_contract(N; lower, upper, sc_target, link_space=2)
+  distribution = Uniform{Float64}(lower, upper)
+  network = randomITensorNetwork(named_grid(N); link_space=link_space, distribution=distribution)
+  return exact_contract(N, network; sc_target)
+end
+
+function exact_contract(N, network; sc_target)
   ITensors.set_warn_order(1000)
   reset_timer!(ITensors.timer)
-  linkdim = 2
-  network = ising_network(named_grid(N), beta)
   tn = Array{ITensor,length(N)}(undef, N...)
   for v in vertices(network)
     tn[v...] = network[v...]
   end
   tn = vec(tn)
-  seq = contraction_sequence(tn; alg="kahypar_bipartite", sc_target=sc_target)
+  seq = contraction_sequence(tn; alg="tree_sa")#alg="kahypar_bipartite", sc_target=sc_target)
   @info seq
   tn = [(i, 0.0) for i in tn]
   return contract_log_norm(tn, seq)
@@ -133,7 +142,9 @@ end
 function build_tntree(N; block_size, beta, h, snake, env_size, szverts)
   @info "beta is", beta
   ITensors.set_warn_order(100)
-  network = ising_network(named_grid(N), beta; h=h, szverts=szverts)
+  # network = ising_network(named_grid(N), beta; h=h, szverts=szverts)
+  distribution = Uniform{Float64}(-0.4, 1.0)
+  network = randomITensorNetwork(named_grid(N); link_space=2, distribution=distribution)
   tn = Array{ITensor,length(N)}(undef, N...)
   for v in vertices(network)
     tn[v...] = network[v...]
@@ -225,8 +236,9 @@ function bench_3d_cube_lnZ(
       use_cache=use_cache,
       orthogonalize=ortho,
     )
-    @info "out is", log(out[1][1]) + log_acc_norm
-    return log(out[1][1]) + log_acc_norm
+    log_acc_norm = log(norm(out)) + log_acc_norm
+    @info "out is", log_acc_norm
+    return log_acc_norm
   end
   out_list = []
   for _ in 1:num_iter
@@ -314,8 +326,10 @@ function bench_3d_cube_magnetization(
   return show(ITensors.timer)
 end
 
+Random.seed!(1234)
 TimerOutputs.enable_debug_timings(ITensorNetworks)
-# exact_contract((4, 4, 10); beta=0.3, sc_target=28)
+# @count_ops exact_ising_contract((3, 3, 3); beta=0.3, sc_target=28)
+# exact_uniform_random_contract((5, 5, 5); lower=-0.4, upper=1.0, sc_target=30, link_space=2) # 47.239753244708396
 # TODO: (6, 6, 6), env_size=(2, 1, 1) is buggy (cutoff=1e-12, maxdim=256, ansatz="comb", algorithm="density_matrix",)
 # TODO below is buggy
 # @time bench_3d_cube_lnZ(
@@ -333,8 +347,8 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 #   ortho=false,
 #   env_size=(3, 1, 1),
 # )
-@time bench_3d_cube_lnZ(
-  (6, 6, 6);
+ @count_ops bench_3d_cube_lnZ(
+  (5, 5, 5);
   block_size=(1, 1, 1),
   beta=0.3,
   h=0.0,
@@ -346,7 +360,7 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
   snake=false,
   use_cache=true,
   ortho=false,
-  env_size=(6, 1, 1),
+  env_size=(5, 1, 1),
 )
 
 # @time bench_3d_cube_magnetization(

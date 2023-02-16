@@ -1,6 +1,7 @@
 module ITensorNetworks
 
 using AbstractTrees
+using Cassette
 using Combinatorics
 using Compat
 using DataGraphs
@@ -64,6 +65,7 @@ function iterate(::AbstractDataGraph)
   )
 end
 
+include("flops.jl")
 include("observers.jl")
 include("utils.jl")
 include("visualize.jl")
