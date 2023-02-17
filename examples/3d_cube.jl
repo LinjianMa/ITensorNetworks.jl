@@ -1,4 +1,4 @@
-using ITensors, Graphs
+using ITensors, Graphs, Distributions, Random
 using TimerOutputs
 using KaHyPar
 using ITensorNetworks
@@ -28,17 +28,15 @@ function contract_log_norm(tn, seq)
   end
 end
 
-function exact_contract(N; beta, sc_target)
+function exact_contract(N, network; sc_target)
   ITensors.set_warn_order(1000)
   reset_timer!(ITensors.timer)
-  linkdim = 2
-  network = ising_network(named_grid(N), beta)
   tn = Array{ITensor,length(N)}(undef, N...)
   for v in vertices(network)
     tn[v...] = network[v...]
   end
   tn = vec(tn)
-  seq = contraction_sequence(tn; alg="kahypar_bipartite", sc_target=sc_target)
+  seq = contraction_sequence(tn; alg="tree_sa")#alg="kahypar_bipartite", sc_target=sc_target)
   @info seq
   tn = [(i, 0.0) for i in tn]
   return contract_log_norm(tn, seq)
@@ -130,10 +128,8 @@ end
 #   end
 # end
 # end
-function build_tntree(N; block_size, beta, h, snake, env_size, szverts)
-  @info "beta is", beta
+function build_tntree(N, network::ITensorNetwork; block_size, snake, env_size)
   ITensors.set_warn_order(100)
-  network = ising_network(named_grid(N), beta; h=h, szverts=szverts)
   tn = Array{ITensor,length(N)}(undef, N...)
   for v in vertices(network)
     tn[v...] = network[v...]
@@ -191,10 +187,9 @@ function build_tntree(N; block_size, beta, h, snake, env_size, szverts)
 end
 
 function bench_3d_cube_lnZ(
-  N;
+  N,
+  network;
   block_size,
-  beta,
-  h,
   num_iter,
   cutoff,
   maxdim,
@@ -206,15 +201,7 @@ function bench_3d_cube_lnZ(
   env_size,
 )
   reset_timer!(ITensors.timer)
-  tntree = build_tntree(
-    N;
-    block_size=block_size,
-    beta=beta,
-    h=h,
-    snake=snake,
-    env_size=env_size,
-    szverts=nothing,
-  )
+  tntree = build_tntree(N, network; block_size=block_size, snake=snake, env_size=env_size)
   function _run()
     out, log_acc_norm = approximate_contract(
       tntree;
@@ -225,8 +212,9 @@ function bench_3d_cube_lnZ(
       use_cache=use_cache,
       orthogonalize=ortho,
     )
-    @info "out is", log(out[1][1]) + log_acc_norm
-    return log(out[1][1]) + log_acc_norm
+    log_acc_norm = log(norm(out)) + log_acc_norm
+    @info "out is", log_acc_norm
+    return log_acc_norm
   end
   out_list = []
   for _ in 1:num_iter
@@ -243,10 +231,9 @@ function bench_3d_cube_lnZ(
 end
 
 function bench_3d_cube_magnetization(
-  N;
+  N,
+  network_pair;
   block_size,
-  beta,
-  h,
   num_iter,
   cutoff,
   maxdim,
@@ -256,26 +243,13 @@ function bench_3d_cube_magnetization(
   use_cache,
   ortho,
   env_size,
-  szverts,
 )
   reset_timer!(ITensors.timer)
   tntree1 = build_tntree(
-    N;
-    block_size=block_size,
-    beta=beta,
-    h=h,
-    snake=snake,
-    env_size=env_size,
-    szverts=szverts,
+    N, network_pair.first; block_size=block_size, snake=snake, env_size=env_size
   )
   tntree2 = build_tntree(
-    N;
-    block_size=block_size,
-    beta=beta,
-    h=h,
-    snake=snake,
-    env_size=env_size,
-    szverts=nothing,
+    N, network_pair.second; block_size=block_size, snake=snake, env_size=env_size
   )
   function _run()
     out, log_acc_norm = approximate_contract(
@@ -314,13 +288,25 @@ function bench_3d_cube_magnetization(
   return show(ITensors.timer)
 end
 
+Random.seed!(1234)
 TimerOutputs.enable_debug_timings(ITensorNetworks)
-# exact_contract((4, 4, 10); beta=0.3, sc_target=28)
+
+# N = (3, 3, 3)
+# beta = 0.3
+# network = ising_network(named_grid(N), beta=beta)
+# exact_contract(N, network; sc_target=28)
+
+# N = (5, 5, 5)
+# distribution = Uniform{Float64}(-0.4, 1.0)
+# network = randomITensorNetwork(named_grid(N); link_space=2, distribution=distribution)
+# exact_contract(N, network; sc_target=30) # 47.239753244708396
+
 # TODO: (6, 6, 6), env_size=(2, 1, 1) is buggy (cutoff=1e-12, maxdim=256, ansatz="comb", algorithm="density_matrix",)
+
 # TODO below is buggy
 # @time bench_3d_cube_lnZ(
 #   (3, 8, 10);
-#   use_2D=false,
+#   block_size=(1, 1, 1),
 #   beta=0.3,
 #   h=0.0,
 #   num_iter=2,
@@ -333,11 +319,14 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 #   ortho=false,
 #   env_size=(3, 1, 1),
 # )
+
+N = (3, 3, 3)
+beta = 0.3
+network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
 @time bench_3d_cube_lnZ(
-  (6, 6, 6);
+  N,
+  network;
   block_size=(1, 1, 1),
-  beta=0.3,
-  h=0.0,
   num_iter=2,
   cutoff=1e-12,
   maxdim=64,
@@ -346,16 +335,21 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
   snake=false,
   use_cache=true,
   ortho=false,
-  env_size=(6, 1, 1),
+  env_size=(3, 1, 1),
 )
 
+# N = (1, 6, 6)
+# beta = 0.44
+# h = 0.0001
+# szverts = [(1, 3, 3)]
+# network1 = ising_network(named_grid(N), beta; h=h, szverts=szverts)
+# network2 = ising_network(named_grid(N), beta; h=h, szverts=nothing)
 # @time bench_3d_cube_magnetization(
-#   (1, 6, 6);
-#   use_2D=true,
-#   beta=0.44,
-#   h=0.0001,
+#   N,
+#   network1 => network2;
+#   block_size=(1, 1, 1),
 #   num_iter=2,
-#   cutoff=1e-20,
+#   cutoff=1e-12,
 #   maxdim=64,
 #   ansatz="mps",
 #   algorithm="density_matrix",
@@ -363,5 +357,4 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 #   use_cache=true,
 #   ortho=false,
 #   env_size=(1, 6, 1),
-#   szverts=[(1, 3, 3)],
 # )
