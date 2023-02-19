@@ -347,20 +347,21 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 #   ortho=false,
 #   env_size=(3, 1, 1),
 # )
- @count_ops bench_3d_cube_lnZ(
-  (5, 5, 5);
+
+@count_ops bench_3d_cube_lnZ(
+  (3, 3, 3);
   block_size=(1, 1, 1),
   beta=0.3,
   h=0.0,
   num_iter=2,
   cutoff=1e-12,
-  maxdim=64,
+  maxdim=16,
   ansatz="mps",
   algorithm="density_matrix",
   snake=false,
   use_cache=true,
   ortho=false,
-  env_size=(5, 1, 1),
+  env_size=(3, 1, 1),
 )
 
 # @time bench_3d_cube_magnetization(
