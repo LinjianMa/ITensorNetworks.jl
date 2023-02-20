@@ -1,6 +1,7 @@
 module ITensorNetworks
 
 using AbstractTrees
+using Cassette
 using Combinatorics
 using Compat
 using DataGraphs
@@ -61,6 +62,8 @@ function iterate(::AbstractDataGraph)
   )
 end
 
+include(joinpath("profilers", "overdub.jl"))
+include(joinpath("profilers", "flops.jl"))
 include("observers.jl")
 include("utils.jl")
 include("visualize.jl")
