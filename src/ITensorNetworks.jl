@@ -64,6 +64,7 @@ end
 
 include(joinpath("profilers", "overdub.jl"))
 include(joinpath("profilers", "flops.jl"))
+include(joinpath("profilers", "itensorflopsctx.jl"))
 include("observers.jl")
 include("utils.jl")
 include("visualize.jl")

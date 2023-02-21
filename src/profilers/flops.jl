@@ -1,14 +1,4 @@
-Cassette.@context CounterCtx
-
-function Cassette.prehook(
-  ctx::CounterCtx, contract::typeof(contract), t1::ITensor, t2::ITensor
-)
-  @info "prehook contrct", t1, t2, "type", typeof(contract)
-  if !haskey(ctx.metadata, "contract")
-    ctx.metadata["contract"] = 0
-  end
-  return ctx.metadata["contract"] += 2 * dim(union(inds(t1), inds(t2)))
-end
+# function flops()
 
 """
 !!! warning
@@ -21,12 +11,6 @@ macro no_flops(sig_expr)
   return no_overdub(sig_expr)
 end
 
-# macro flops
-# end
-
-# macro count_flops
-# end
-
 # Modified from https://github.com/triscale-innov/GFlops.jl/blob/a2ad017e880e908381d384c04c030db0042b37c5/src/count_ops.jl#L1-L36
 prepare_call(expr) = expr
 prepare_call(s::Symbol) = esc(s)
@@ -36,19 +20,18 @@ function prepare_call(expr::Expr)
   return Expr(expr.head, expr_list...)
 end
 
-function count_ops(expr)
+function count_flops(expr)
+  Meta.isexpr(expr, :tuple) || error("Invalid use of `count_flops`")
+  length(expr.args) == 2 || error("Invalid use of `count_flops`")
+  count_ctx, expr = expr.args
   expr = prepare_call(expr)
   return quote
-    ctx = CounterCtx(; metadata=Dict())
+    ctx = $(count_ctx)(; metadata=Dict())
     Cassette.overdub(ctx, () -> $expr)
     ctx.metadata
   end
 end
 
-macro count_ops(expr)
-  return count_ops(expr)
+macro count_flops(expr)
+  return count_flops(expr)
 end
-
-@no_flops noncommoninds(args...)
-# @no_flops commoninds(args...; kwargs...)
-@no_flops contract(::ITensor, ::ITensor) # TODO

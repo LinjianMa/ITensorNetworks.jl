@@ -5,15 +5,26 @@
 
 Code modified from https://github.com/JuliaDiff/ChainRulesCore.jl/blob/ed9a0073ff83cb3b1f4619303e41f4dd5d8c4825/src/rule_definition_tools.jl#L362
 """
-function no_overdub(sig_expr::Expr)
-  Meta.isexpr(sig_expr, :call) || error("Invalid use of `@no_overdub`")
+function no_overdub(expr::Expr)
+  ctx, primal_sig_parts, primal_invoke = _pre_process_overdub_expr(expr)
+  return quote
+    $(_no_overdub(ctx, primal_sig_parts, primal_invoke))
+  end
+end
+
+function _pre_process_overdub_expr(expr::Expr)
+  Meta.isexpr(expr, :tuple) || error("Invalid use of `no_overdub`")
+  length(expr.args) == 2 || error("Invalid use of `no_overdub`")
+  ctx, sig_expr = expr.args
+
+  Meta.isexpr(sig_expr, :call) || error("Invalid use of `no_overdub`")
   has_vararg = _isvararg(sig_expr.args[end])
 
   primal_name, orig_args = Iterators.peel(sig_expr.args)
 
   primal_name_sig, primal_name = _split_primal_name(primal_name)
   constrained_args = _constrain_and_name.(orig_args, :Any)
-  primal_sig_parts = [primal_name_sig, constrained_args...]
+  primal_sig_parts = esc.([primal_name_sig, constrained_args...])
 
   unconstrained_args = esc.(_unconstrain.(constrained_args))
   primal_name = esc(primal_name)
@@ -25,16 +36,13 @@ function no_overdub(sig_expr::Expr)
     var_arg = unconstrained_args[end]
     :($(primal_name)($(normal_args...), $(var_arg)...; kwargs...))
   end
-
-  return quote
-    $(_no_overdub(primal_sig_parts, primal_invoke))
-  end
+  return esc(ctx), primal_sig_parts, primal_invoke
 end
 
-function _no_overdub(primal_sig_parts, primal_invoke)
-  # @gensym kwargs
+function _no_overdub(ctx, primal_sig_parts, primal_invoke)
   return quote
-    function Cassette.overdub(::CounterCtx, $(map(esc, primal_sig_parts)...); kwargs...)
+    function Cassette.overdub(::$(ctx), $(primal_sig_parts...); kwargs...)
+      @show $(primal_invoke), kwargs, "kwargs"
       return $(primal_invoke)
     end
   end
