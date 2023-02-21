@@ -11,6 +11,24 @@ macro no_flops(sig_expr)
   return no_overdub(sig_expr)
 end
 
+# macro flops(sig_expr)
+#   ctx, primal_sig_parts, primal_invoke = _pre_process_overdub_expr(expr)
+#   return quote
+#     $(_no_overdub(ctx, primal_sig_parts, primal_invoke))
+#     $(_flops(ctx, primal_sig_parts, primal_invoke))
+#   end
+# end
+
+# # TODO
+# function _flops(ctx, primal_sig_parts, primal_invoke)
+#   return quote
+#     function Cassette.overdub(::$(ctx), $(primal_sig_parts...); kwargs...)
+#       @show $(primal_invoke), kwargs, "kwargs"
+#       return $(primal_invoke)
+#     end
+#   end
+# end
+
 # Modified from https://github.com/triscale-innov/GFlops.jl/blob/a2ad017e880e908381d384c04c030db0042b37c5/src/count_ops.jl#L1-L36
 prepare_call(expr) = expr
 prepare_call(s::Symbol) = esc(s)
