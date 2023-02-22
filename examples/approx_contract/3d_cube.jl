@@ -1,42 +1,4 @@
-using KaHyPar
 using ITensorNetworks: approximate_contract, contraction_sequence, vertex_tag
-
-INDEX = 0
-
-function contract_log_norm(tn, seq)
-  global INDEX
-  if seq isa Vector
-    if length(seq) == 1
-      return seq[1]
-    end
-    t1 = contract_log_norm(tn, seq[1])
-    t2 = contract_log_norm(tn, seq[2])
-    @info size(t1[1]), size(t2[1])
-    INDEX += 1
-    @info "INDEX", INDEX
-    out = t1[1] * t2[1]
-    nrm = norm(out)
-    out /= nrm
-    lognrm = log(nrm) + t1[2] + t2[2]
-    return (out, lognrm)
-  else
-    return tn[seq]
-  end
-end
-
-function exact_contract(N, network; sc_target)
-  ITensors.set_warn_order(1000)
-  reset_timer!(ITensors.timer)
-  tn = Array{ITensor,length(N)}(undef, N...)
-  for v in vertices(network)
-    tn[v...] = network[v...]
-  end
-  tn = vec(tn)
-  seq = contraction_sequence(tn; alg="tree_sa")#alg="kahypar_bipartite", sc_target=sc_target)
-  @info seq
-  tn = [(i, 0.0) for i in tn]
-  return contract_log_norm(tn, seq)
-end
 
 function build_tntree(tn, N; env_size)
   @assert length(N) == length(env_size)
@@ -125,7 +87,6 @@ end
 # end
 # end
 function build_tntree(N, network::ITensorNetwork; block_size, snake, env_size)
-  ITensors.set_warn_order(100)
   tn = Array{ITensor,length(N)}(undef, N...)
   for v in vertices(network)
     tn[v...] = network[v...]
@@ -180,106 +141,4 @@ function build_tntree(N, network::ITensorNetwork; block_size, snake, env_size)
     ceil(Int, env_size[3] / block_size[3]),
   )
   return build_tntree(network_reduced, reduced_N; env_size=reduced_env)
-end
-
-function bench_3d_cube_lnZ(
-  N,
-  network;
-  block_size,
-  num_iter,
-  cutoff,
-  maxdim,
-  ansatz,
-  algorithm,
-  snake,
-  use_cache,
-  ortho,
-  env_size,
-)
-  reset_timer!(ITensors.timer)
-  tntree = build_tntree(N, network; block_size=block_size, snake=snake, env_size=env_size)
-  function _run()
-    out, log_acc_norm = approximate_contract(
-      tntree;
-      cutoff=cutoff,
-      maxdim=maxdim,
-      ansatz=ansatz,
-      algorithm=algorithm,
-      use_cache=use_cache,
-      orthogonalize=ortho,
-    )
-    log_acc_norm = log(norm(out)) + log_acc_norm
-    @info "out is", log_acc_norm
-    return log_acc_norm
-  end
-  out_list = []
-  for _ in 1:num_iter
-    push!(out_list, _run())
-  end
-  show(ITensors.timer)
-  # after warmup, start to benchmark
-  reset_timer!(ITensors.timer)
-  for _ in 1:num_iter
-    push!(out_list, _run())
-  end
-  @info "lnZ results are", out_list, "mean is", sum(out_list) / (num_iter * 2)
-  return show(ITensors.timer)
-end
-
-function bench_3d_cube_magnetization(
-  N,
-  network_pair;
-  block_size,
-  num_iter,
-  cutoff,
-  maxdim,
-  ansatz,
-  algorithm,
-  snake,
-  use_cache,
-  ortho,
-  env_size,
-)
-  reset_timer!(ITensors.timer)
-  tntree1 = build_tntree(
-    N, network_pair.first; block_size=block_size, snake=snake, env_size=env_size
-  )
-  tntree2 = build_tntree(
-    N, network_pair.second; block_size=block_size, snake=snake, env_size=env_size
-  )
-  function _run()
-    out, log_acc_norm = approximate_contract(
-      tntree1;
-      cutoff=cutoff,
-      maxdim=maxdim,
-      ansatz=ansatz,
-      algorithm=algorithm,
-      use_cache=use_cache,
-      orthogonalize=ortho,
-    )
-    lognorm1 = log(out[1][1]) + log_acc_norm
-    out, log_acc_norm = approximate_contract(
-      tntree2;
-      cutoff=cutoff,
-      maxdim=maxdim,
-      ansatz=ansatz,
-      algorithm=algorithm,
-      use_cache=use_cache,
-      orthogonalize=ortho,
-    )
-    lognorm2 = log(out[1][1]) + log_acc_norm
-    return lognorm1 / lognorm2
-  end
-  out_list = []
-  for _ in 1:num_iter
-    push!(out_list, _run())
-  end
-  show(ITensors.timer)
-  # after warmup, start to benchmark
-  reset_timer!(ITensors.timer)
-  for _ in 1:num_iter
-    push!(out_list, _run())
-  end
-  @info "magnetization results are", out_list, "mean is", sum(out_list) / (num_iter * 2)
-  return show(ITensors.timer)
 end
