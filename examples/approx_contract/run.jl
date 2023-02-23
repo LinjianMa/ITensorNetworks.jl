@@ -55,20 +55,20 @@ Bugs
 #=
 bench_3d_cube_lnZ
 =#
-# N = (3, 3, 3)
-# beta = 0.3
-# network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
-# tntree = build_tntree(N, network; block_size=(1, 1, 1), snake=false, env_size=(3, 1, 1))
-# @time bench_lnZ(
-#   tntree;
-#   num_iter=2,
-#   cutoff=1e-12,
-#   maxdim=64,
-#   ansatz="mps",
-#   algorithm="density_matrix",
-#   use_cache=true,
-#   ortho=false,
-# )
+N = (5, 5, 5)
+beta = 0.3
+network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
+tntree = build_tntree(N, network; block_size=(1, 1, 1), snake=false, env_size=(1, 1, 1))
+@time bench_lnZ(
+  tntree;
+  num_iter=2,
+  cutoff=1e-12,
+  maxdim=64,
+  ansatz="mps",
+  algorithm="density_matrix",
+  use_cache=true,
+  ortho=false,
+)
 
 #=
 bench_3d_cube_magnetization
@@ -112,22 +112,22 @@ SweepContractor
 #=
 random regular graph
 =#
-nv = 220
-deg = 3
-distribution = Uniform{Float64}(-0.2, 1.0)
-network = randomITensorNetwork(
-  random_regular_graph(nv, deg); link_space=2, distribution=distribution
-)
-# exact_contract(network; sc_target=30) # 5.633462619348083
-# nvertices_per_partition=10 works 20 not work
-tntree = build_tntree(network; nvertices_per_partition=15)
-@time bench_lnZ(
-  tntree;
-  num_iter=2,
-  cutoff=1e-12,
-  maxdim=64,
-  ansatz="mps",
-  algorithm="density_matrix",
-  use_cache=true,
-  ortho=false,
-)
+# nv = 220
+# deg = 3
+# distribution = Uniform{Float64}(-0.2, 1.0)
+# network = randomITensorNetwork(
+#   random_regular_graph(nv, deg); link_space=2, distribution=distribution
+# )
+# # exact_contract(network; sc_target=30) # 5.633462619348083
+# # nvertices_per_partition=10 works 15/20 not work
+# tntree = build_tntree(network; nvertices_per_partition=10)
+# @time bench_lnZ(
+#   tntree;
+#   num_iter=2,
+#   cutoff=1e-12,
+#   maxdim=64,
+#   ansatz="mps",
+#   algorithm="density_matrix",
+#   use_cache=true,
+#   ortho=false,
+# )

@@ -44,3 +44,17 @@ function neighbor_index_groups(contraction, index_groups)
     return nigs
   end
 end
+
+function split_igs(igs::Vector{IndexGroup}, inter_igs::Vector{IndexGroup})
+  igs_left = Vector{IndexGroup}()
+  igs_right = Vector{IndexGroup}()
+  target_array = igs_left
+  for i in igs
+    if i in inter_igs
+      target_array = igs_right
+      continue
+    end
+    push!(target_array, i)
+  end
+  return igs_left, igs_right
+end
