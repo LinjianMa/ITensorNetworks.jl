@@ -43,7 +43,7 @@ function bench_magnetization(
       use_cache=use_cache,
       orthogonalize=ortho,
     )
-    lognorm1 = log(out[1][1]) + log_acc_norm
+    lognorm1 = log(norm(out)) + log_acc_norm
     out, log_acc_norm = approximate_contract(
       tntree2;
       cutoff=cutoff,
@@ -53,8 +53,8 @@ function bench_magnetization(
       use_cache=use_cache,
       orthogonalize=ortho,
     )
-    lognorm2 = log(out[1][1]) + log_acc_norm
-    return lognorm1 / lognorm2
+    lognorm2 = log(norm(out)) + log_acc_norm
+    return exp(lognorm1 - lognorm2)
   end
   out_list = []
   for _ in 1:num_iter

@@ -79,6 +79,9 @@ bench_3d_cube_magnetization
 # szverts = [(1, 3, 3)]
 # network1 = ising_network(named_grid(N), beta; h=h, szverts=szverts)
 # network2 = ising_network(named_grid(N), beta; h=h, szverts=nothing)
+# # e1 = exact_contract(network1; sc_target=28)
+# # e2 = exact_contract(network2; sc_target=28)
+# # @info exp(e1[2] - e2[2])
 # tntree1 = build_tntree(N, network1; block_size=(1, 1, 1), snake=false, env_size=(1, 6, 1))
 # tntree2 = build_tntree(N, network2; block_size=(1, 1, 1), snake=false, env_size=(1, 6, 1))
 # @time bench_magnetization(
