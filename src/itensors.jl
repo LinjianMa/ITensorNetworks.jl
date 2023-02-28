@@ -64,4 +64,3 @@ is_delta(t::ITensors.Tensor) = false
 function is_delta(t::ITensors.NDTensors.UniformDiagTensor)
   return isone(ITensors.NDTensors.getdiagindex(t, 1))
 end
-is_delta(t) = (t.tensor.storage.data == 1.0)

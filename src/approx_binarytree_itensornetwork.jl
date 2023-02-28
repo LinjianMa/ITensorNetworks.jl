@@ -437,7 +437,7 @@ function _approx_binary_tree_itensornetwork(
   # The `binary_tree_partition` may contain multiple delta tensors to make sure
   # the partition has a binary tree structure. These delta tensors could hurt the
   # performance when computing density matrices so we remove them first.
-  partition_wo_deltas = _contract_non_leaf_deltas(binary_tree_partition; root=root)
+  partition_wo_deltas = _contract_deltas(binary_tree_partition; root=root)
   return _approx_binary_tree_itensornetwork!(
     partition_wo_deltas,
     underlying_graph(binary_tree_partition);

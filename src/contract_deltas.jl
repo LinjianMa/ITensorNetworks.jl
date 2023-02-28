@@ -50,28 +50,33 @@ function _delta_inds_disjointsets(deltas::Vector{<:ITensor}, rootinds::Vector{<:
 end
 
 """
-Given an input tensor network containing tensors in the input `tn` and
-tensors in `deltas`, remove redundent delta tensors in `deltas` and change
-inds accordingly to make the output `tn` and `out_deltas` represent the same
-tensor network but with less delta tensors.
-Note: inds of tensors in `tn` and `deltas` may be changed, and `out_deltas`
-  may still contain necessary delta tensors.
+Given an input tensor network `tn`, remove redundent delta tensors
+in `tn` and change inds accordingly to make the output `tn` represent
+the same tensor network but with less delta tensors.
 
 ========
 Example:
-  julia> is = [Index(2, "i") for i in 1:6]
+  julia> is = [Index(2, string(i)) for i in 1:6]
   julia> a = ITensor(is[1], is[2])
   julia> b = ITensor(is[2], is[3])
   julia> delta1 = delta(is[3], is[4])
   julia> delta2 = delta(is[5], is[6])
-  julia> tn = ITensorNetwork([a,b])
-  julia> tn, out_deltas = ITensorNetworks._remove_deltas(tn, [delta1, delta2])
-  julia> noncommoninds(Vector{ITensor}(tn)...)
-  2-element Vector{Index{Int64}}:
-   (dim=2|id=339|"1")
-   (dim=2|id=489|"4")
-  julia> length(out_deltas)
-  1
+  julia> tn = ITensorNetwork([a, b, delta1, delta2])
+  julia> ITensorNetworks._contract_deltas(tn)
+  ITensorNetwork{Int64} with 3 vertices:
+  3-element Vector{Int64}:
+   1
+   2
+   4
+
+  and 1 edge(s):
+  1 => 2
+
+  with vertex data:
+  3-element Dictionaries.Dictionary{Int64, Any}
+   1 │ ((dim=2|id=457|"1"), (dim=2|id=296|"2"))
+   2 │ ((dim=2|id=296|"2"), (dim=2|id=613|"4"))
+   4 │ ((dim=2|id=626|"6"), (dim=2|id=237|"5"))
 """
 function _contract_deltas(tn::ITensorNetwork)
   tn = copy(tn)
@@ -81,7 +86,6 @@ function _contract_deltas(tn::ITensorNetwork)
   ds = _delta_inds_disjointsets(deltas, outinds)
   deltainds = [ds...]
   sim_deltainds = [find_root!(ds, i) for i in deltainds]
-  vs = copy(vertices(tn))
   # `rem_vertex!(tn, v)` changes `vertices(tn)` in place.
   # We copy it here so that the enumeration won't be affected.
   for v in copy(vertices(tn))
@@ -104,16 +108,19 @@ function _contract_deltas(tn::ITensorNetwork)
 end
 
 """
-Given an input `partition`, remove redundent delta tensors in non-leaf vertices of
-`partition` without changing the tensor network value. `root` is the root of the
+Given an input `partition`, contract redundent delta tensors in `partition`
+without changing the tensor network value. `root` is the root of the
 dfs_tree that defines the leaves.
+Note: for each vertex `v` of `partition`, the number of non-delta tensors
+  in `partition[v]` will not be changed.
+Note: only delta tensors of non-leaf vertices will be contracted.
 """
-function _contract_non_leaf_deltas(partition::DataGraph; root=1)
+function _contract_deltas(partition::DataGraph; root=1)
   partition = copy(partition)
   leaves = leaf_vertices(dfs_tree(partition, root))
   # We only remove deltas in non-leaf vertices
   nonleaf_vertices = setdiff(vertices(partition), leaves)
-  outinds = _get_out_inds(subgraph(partition, nonleaf_vertices))
+  rootinds = _get_out_inds(subgraph(partition, nonleaf_vertices))
   all_deltas = mapreduce(
     tn_v -> [
       partition[tn_v][v] for v in vertices(partition[tn_v]) if is_delta(partition[tn_v][v])
@@ -124,7 +131,7 @@ function _contract_non_leaf_deltas(partition::DataGraph; root=1)
   if length(all_deltas) == 0
     return partition
   end
-  ds = _delta_inds_disjointsets(all_deltas, outinds)
+  ds = _delta_inds_disjointsets(all_deltas, rootinds)
   deltainds = [ds...]
   deltainds_to_sim = Dict(zip(deltainds, [find_root!(ds, ind) for ind in deltainds]))
   for tn_v in nonleaf_vertices
