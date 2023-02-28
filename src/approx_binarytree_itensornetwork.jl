@@ -358,8 +358,9 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   # update partition and out_tree
   root_tensor = _optcontract([Vector{ITensor}(alg_graph.partition[root])..., U])
   new_root = child_vertices(dm_dfs_tree, root)[1]
-  new_tn = disjoint_union(alg_graph.partition[new_root], ITensorNetwork([root_tensor]))
-  alg_graph.partition[new_root] = ITensorNetwork{Any}(new_tn)
+  alg_graph.partition[new_root] = disjoint_union(
+    alg_graph.partition[new_root], ITensorNetwork([root_tensor])
+  )
   rem_vertex!(alg_graph.partition, root)
   rem_vertex!(alg_graph.out_tree, root)
   # update v_to_cpdms[new_root]
@@ -447,8 +448,15 @@ Approximate a `partition` into an output ITensorNetwork
 with the binary tree structure defined by `out_tree`.
 """
 function _approx_binary_tree_itensornetwork!(
-  partition::DataGraph, out_tree::NamedGraph; root=1, cutoff=1e-15, maxdim=10000
+  input_partition::DataGraph, out_tree::NamedGraph; root=1, cutoff=1e-15, maxdim=10000
 )
+  # Change type of each partition[v] since they will be updated
+  # with potential data type chage.
+  partition = DataGraph()
+  for v in vertices(input_partition)
+    add_vertex!(partition, v)
+    partition[v] = ITensorNetwork{Any}(input_partition[v])
+  end
   @assert sort(vertices(partition)) == sort(vertices(out_tree))
   alg_graph = _DensityMartrixAlgGraph(partition, out_tree, root)
   output_tn = ITensorNetwork()

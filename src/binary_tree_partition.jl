@@ -179,5 +179,5 @@ function binary_tree_partition(tn::ITensorNetwork, inds_btree::Vector)
     end
   end
   tn_deltas = ITensorNetwork(vcat(output_deltas_vector...))
-  return partition(ITensorNetwork{Any}(disjoint_union(out_tn, tn_deltas)), subgraph_vs)
+  return partition(ITensorNetwork(disjoint_union(out_tn, tn_deltas)), subgraph_vs)
 end
