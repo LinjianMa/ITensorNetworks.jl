@@ -1,8 +1,6 @@
 # Note that the children ordering matters here.
-# TODO: remove fixed_direction
 mutable struct IndexAdjacencyTree
   children::Union{Vector{IndexAdjacencyTree},Vector{IndexGroup}}
-  fixed_direction::Bool
   fixed_order::Bool
 end
 
@@ -10,13 +8,11 @@ function Base.copy(tree::IndexAdjacencyTree)
   node_to_copynode = Dict{IndexAdjacencyTree,IndexAdjacencyTree}()
   for node in topo_sort(tree; type=IndexAdjacencyTree)
     if node.children isa Vector{IndexGroup}
-      node_to_copynode[node] = IndexAdjacencyTree(
-        node.children, node.fixed_direction, node.fixed_order
-      )
+      node_to_copynode[node] = IndexAdjacencyTree(node.children, node.fixed_order)
       continue
     end
     copynode = IndexAdjacencyTree(
-      [node_to_copynode[n] for n in node.children], node.fixed_direction, node.fixed_order
+      [node_to_copynode[n] for n in node.children], node.fixed_order
     )
     node_to_copynode[node] = copynode
   end
@@ -39,13 +35,7 @@ function Base.show(io::IO, tree::IndexAdjacencyTree)
       end
     else
       out_str =
-        out_str *
-        indent *
-        "AdjTree: [fixed_direction]: " *
-        string(node.fixed_direction) *
-        " [fixed_order]: " *
-        string(node.fixed_order) *
-        "\n"
+        out_str * indent * "AdjTree:  [fixed_order]: " * string(node.fixed_order) * "\n"
       for c in node.children
         node_to_level[c] = node_to_level[node] + 1
         push!(stack, c)
@@ -55,9 +45,7 @@ function Base.show(io::IO, tree::IndexAdjacencyTree)
   return print(io, out_str)
 end
 
-function IndexAdjacencyTree(index_group::IndexGroup)
-  return IndexAdjacencyTree([index_group], false, false)
-end
+IndexAdjacencyTree(index_group::IndexGroup) = IndexAdjacencyTree([index_group], false)
 
 function get_adj_tree_leaves(tree::IndexAdjacencyTree)
   if tree.children isa Vector{IndexGroup}
@@ -119,12 +107,12 @@ function reorder_to_right!(
   if length(remain_children) == 1
     new_child1 = remain_children[1]
   else
-    new_child1 = IndexAdjacencyTree(remain_children, false, false)
+    new_child1 = IndexAdjacencyTree(remain_children, false)
   end
   if length(filter_children) == 1
     new_child2 = filter_children[1]
   else
-    new_child2 = IndexAdjacencyTree(filter_children, false, false)
+    new_child2 = IndexAdjacencyTree(filter_children, false)
   end
   ancestor.children = [new_child1, new_child2]
   return ancestor.fixed_order = true
@@ -212,7 +200,7 @@ function update_igs_to_adjacency_tree!(
       root_igs = keys(root_igs_to_adjacent_igs)
       root = union(root_igs...)
       igs_to_adjacency_tree[root] = IndexAdjacencyTree(
-        [igs_to_adjacency_tree[r] for r in root_igs], false, false
+        [igs_to_adjacency_tree[r] for r in root_igs], false
       )
       for r in root_igs
         delete!(igs_to_adjacency_tree, r)
@@ -230,14 +218,14 @@ function update_igs_to_adjacency_tree!(
     adj_tree_1 = igs_to_adjacency_tree[igs1]
     adj_tree_2 = igs_to_adjacency_tree[igs2]
     if (!reordered_1) && (!reordered_2)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2], false, false)
+      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2], false)
     elseif (!reordered_1)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2.children...], false, true)
+      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2.children...], true)
     elseif (!reordered_2)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1.children..., adj_tree_2], false, true)
+      out_adj_tree = IndexAdjacencyTree([adj_tree_1.children..., adj_tree_2], true)
     else
       out_adj_tree = IndexAdjacencyTree(
-        [adj_tree_1.children..., adj_tree_2.children...], false, true
+        [adj_tree_1.children..., adj_tree_2.children...], true
       )
     end
     root_igs = keys(root_igs_to_adjacent_igs)
@@ -281,7 +269,7 @@ function generate_adjacency_tree(ctree, ancestors, ctree_to_igs)
       end
     end
     if length(igs_to_adjacency_tree) >= 1
-      return IndexAdjacencyTree([collect(values(igs_to_adjacency_tree))...], false, false)
+      return IndexAdjacencyTree([collect(values(igs_to_adjacency_tree))...], false)
     end
   end
 end
@@ -320,8 +308,7 @@ num_adj_swaps(v::Vector) = length(bubble_sort(v))
 function minswap_adjacency_tree!(adj_tree::IndexAdjacencyTree)
   leaves = Vector{IndexGroup}(get_adj_tree_leaves(adj_tree))
   adj_tree.children = leaves
-  adj_tree.fixed_order = true
-  return adj_tree.fixed_direction = true
+  return adj_tree.fixed_order = true
 end
 
 function minswap_adjacency_tree!(
@@ -347,7 +334,6 @@ function minswap_adjacency_tree!(
     children_tree = perms[argmin(nswaps)]
     node.children = vcat(children_tree...)
     node.fixed_order = true
-    node.fixed_direction = true
   end
   return num_adj_swaps(adj_tree.children, input_tree.children)
 end
@@ -381,7 +367,7 @@ function minswap_adjacency_trees(
     out_lists = []
     for l in left_lists
       for r in right_lists
-        push!(out_lists, IndexAdjacencyTree([l..., r...], true, true))
+        push!(out_lists, IndexAdjacencyTree([l..., r...], true))
       end
     end
     return out_lists
