@@ -123,9 +123,10 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
       ancestors = ctree_to_ancestors[c]
       adj_tree = generate_adjacency_tree(c, ancestors, ctree_to_igs)
       if adj_tree != nothing
-        ctree_to_adj_tree[c] = minswap_adjacency_tree(
+        tree1, tree2 = minswap_adjacency_trees(
           adj_tree, ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
         )
+        ctree_to_adj_tree[c] = tree2
       end
     end
     # mapping each contraction tree to its contract igs
@@ -445,6 +446,7 @@ function approximate_contract(
       if use_cache == false
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
+        # TODO: change new_igs into a vector of igs
         inds_btree = ordered_igs_to_binary_tree(
           ctree_to_adj_tree[c].children,
           ctree_to_contract_igs[c],
@@ -506,6 +508,7 @@ function approximate_contract(
         new_igs = [new_igs..., new_ig_right]
         push!(new_ig_to_binary_tree_pairs, new_ig_right.data => cache_binary_tree_right)
       end
+      # TODO: change new_igs into a vector of igs
       @info "approximate contract", new_igs, length(new_igs)
       inds_btree = ordered_igs_to_binary_tree(
         new_igs, ctree_to_contract_igs[c], new_ig_to_linear_order; ansatz=ansatz

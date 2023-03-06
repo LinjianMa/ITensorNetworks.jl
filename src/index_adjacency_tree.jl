@@ -1,4 +1,5 @@
 # Note that the children ordering matters here.
+# TODO: remove fixed_direction
 mutable struct IndexAdjacencyTree
   children::Union{Vector{IndexAdjacencyTree},Vector{IndexGroup}}
   fixed_direction::Bool
@@ -285,41 +286,36 @@ function generate_adjacency_tree(ctree, ancestors, ctree_to_igs)
   end
 end
 
-# Mutates `v` by sorting elements `x[lo:hi]` using the insertion sort algorithm.
-# This method is a copy-paste-edit of sort! in base/sort.jl, amended to return the bubblesort distance.
-function _insertion_sort(v::Vector, lo::Int, hi::Int)
-  @timeit_debug ITensors.timer "_insertion_sort" begin
-    v = copy(v)
-    if lo == hi
-      return 0
-    end
-    nswaps = 0
-    for i in (lo + 1):hi
-      j = i
-      x = v[i]
-      while j > lo
-        if x < v[j - 1]
-          nswaps += 1
-          v[j] = v[j - 1]
-          j -= 1
-          continue
+function bubble_sort(v::Vector)
+  @timeit_debug ITensors.timer "bubble_sort" begin
+    permutations = []
+    n = length(v)
+    for i in 1:n
+      for j in 1:(n - i)
+        if v[j] > v[j + 1]
+          v[j], v[j + 1] = v[j + 1], v[j]
+          push!(permutations, j)
         end
-        break
       end
-      v[j] = x
     end
-    return nswaps
+    return permutations
   end
 end
 
-function insertion_sort(v1::Vector, v2::Vector)
-  value_to_index = Dict{Int,Int}()
+function bubble_sort(v1::Vector{IndexGroup}, v2::Vector{IndexGroup})
+  index_to_number = Dict{IndexGroup,Int}()
   for (i, v) in enumerate(v2)
-    value_to_index[v] = i
+    index_to_number[v] = i
   end
-  new_v1 = [value_to_index[v] for v in v1]
-  return _insertion_sort(new_v1, 1, length(new_v1))
+  v1_num = [index_to_number[v] for v in v1]
+  return bubble_sort(v1_num)
 end
+
+function num_adj_swaps(v1::Vector{IndexGroup}, v2::Vector{IndexGroup})
+  return length(bubble_sort(v1, v2))
+end
+
+num_adj_swaps(v::Vector) = length(bubble_sort(v))
 
 function minswap_adjacency_tree!(adj_tree::IndexAdjacencyTree)
   leaves = Vector{IndexGroup}(get_adj_tree_leaves(adj_tree))
@@ -331,22 +327,14 @@ end
 function minswap_adjacency_tree!(
   adj_tree::IndexAdjacencyTree, input_tree::IndexAdjacencyTree
 )
-  nodes = input_tree.children
-  node_to_int = Dict{IndexGroup,Int}()
-  int_to_node = Dict{Int,IndexGroup}()
-  index = 1
-  for node in nodes
-    node_to_int[node] = index
-    int_to_node[index] = node
-    index += 1
-  end
   for node in topo_sort(adj_tree; type=IndexAdjacencyTree)
     if node.children isa Vector{IndexGroup}
       continue
     end
     children_tree = [get_adj_tree_leaves(n) for n in node.children]
-    children_order = vcat(children_tree...)
-    input_int_order = [node_to_int[n] for n in nodes if n in children_order]
+    input_order = [n for n in input_tree.children if n in vcat(children_tree...)]
+    # Optimize the ordering of children. Note that for each child tree,
+    # its ordering is fixed so we don't optimize that.
     if node.fixed_order
       perms = [children_tree, reverse(children_tree)]
     else
@@ -354,19 +342,23 @@ function minswap_adjacency_tree!(
     end
     nswaps = []
     for perm in perms
-      int_order = [node_to_int[n] for n in vcat(perm...)]
-      push!(nswaps, insertion_sort(int_order, input_int_order))
+      push!(nswaps, num_adj_swaps(vcat(perm...), input_order))
     end
     children_tree = perms[argmin(nswaps)]
     node.children = vcat(children_tree...)
     node.fixed_order = true
     node.fixed_direction = true
   end
-  int_order = [node_to_int[n] for n in adj_tree.children]
-  return _insertion_sort(int_order, 1, length(int_order))
+  return num_adj_swaps(adj_tree.children, input_tree.children)
 end
 
-function minswap_adjacency_tree(
+"""
+Given an `adj_tree` and two input adj trees, `input_tree1`, `input_tree2`,
+return two adj trees, `tree1` and `tree2`, where `tree1` is a simple concatenation of
+`input_tree1` and `input_tree2`, and `tree2` satisfy the constraints in `adj_tree`
+and has the minimin number of swaps w.r.t. `tree1`.
+"""
+function minswap_adjacency_trees(
   adj_tree::IndexAdjacencyTree,
   input_tree1::IndexAdjacencyTree,
   input_tree2::IndexAdjacencyTree,
@@ -430,6 +422,8 @@ function minswap_adjacency_tree(
     # ======================================
     adj_tree_copies = [copy(adj_tree) for _ in 1:length(inputs)]
     nswaps = [minswap_adjacency_tree!(t, i) for (t, i) in zip(adj_tree_copies, inputs)]
-    return adj_tree_copies[argmin(nswaps)]
+    tree1 = inputs[argmin(nswaps)]
+    tree2 = adj_tree_copies[argmin(nswaps)]
+    return tree1, tree2
   end
 end
