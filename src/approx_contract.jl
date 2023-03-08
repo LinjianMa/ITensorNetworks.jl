@@ -9,6 +9,7 @@ end
 include("tree_utils.jl")
 include("index_group.jl")
 include("index_adjacency_tree.jl")
+include("approx_contract_cache.jl")
 
 approximate_contract(tn::ITensor, inds_groups; kwargs...) = [tn], 0.0
 
@@ -123,10 +124,7 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
       ancestors = ctree_to_ancestors[c]
       adj_tree = generate_adjacency_tree(c, ancestors, ctree_to_igs)
       if adj_tree != nothing
-        tree1, tree2 = minswap_adjacency_trees(
-          adj_tree, ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
-        )
-        ctree_to_adj_tree[c] = tree2
+        ctree_to_adj_tree[c] = adj_tree
       end
     end
     # mapping each contraction tree to its contract igs
@@ -169,6 +167,15 @@ function ordered_igs_to_binary_tree(ordered_igs, contract_igs, ig_to_linear_orde
   end
 end
 
+function ordered_igs_to_binary_tree(igs, ig_to_linear_order; ansatz)
+  @assert ansatz in ["comb", "mps"]
+  if ansatz == "comb"
+    return line_to_tree([line_to_tree(ig_to_linear_order[ig]) for ig in igs])
+  end
+  order = vcat([ig_to_linear_order[ig] for ig in igs]...)
+  return line_to_tree(order)
+end
+
 function ordered_igs_to_binary_tree_mps(
   left_igs, right_igs, contract_igs, ig_to_linear_order
 )
@@ -186,11 +193,11 @@ end
 function ordered_igs_to_binary_tree_comb(
   left_igs, right_igs, contract_igs, ig_to_linear_order
 )
-  tree_1 = line_to_tree([line_to_tree(ig_to_linear_order[ig]) for ig in left_igs])
-  tree_contract = line_to_tree([
-    line_to_tree(ig_to_linear_order[ig]) for ig in contract_igs
-  ])
-  tree_2 = line_to_tree([line_to_tree(ig_to_linear_order[ig]) for ig in reverse(right_igs)])
+  tree_1 = ordered_igs_to_binary_tree(left_igs, ig_to_linear_order; ansatz="comb")
+  tree_contract = ordered_igs_to_binary_tree(
+    contract_igs, ig_to_linear_order; ansatz="comb"
+  )
+  tree_2 = ordered_igs_to_binary_tree(reverse(right_igs), ig_to_linear_order; ansatz="comb")
   # make the binary tree more balanced to save tree approximation cost
   if tree_1 == []
     return merge_tree(merge_tree(tree_1, tree_contract), tree_2)
@@ -202,120 +209,6 @@ function ordered_igs_to_binary_tree_comb(
     return merge_tree(merge_tree(tree_1, tree_contract), tree_2)
   else
     return merge_tree(tree_1, merge_tree(tree_contract, tree_2))
-  end
-end
-
-function get_igs_cache_info(igs_list, contract_igs_list)
-  function split_boundary(list1::Vector{IndexGroup}, list2::Vector{IndexGroup})
-    index = 1
-    boundary = Vector{IndexGroup}()
-    while list1[index] == list2[index]
-      push!(boundary, list2[index])
-      index += 1
-      if index > length(list1) || index > length(list2)
-        break
-      end
-    end
-    if index <= length(list1)
-      remain_list1 = list1[index:end]
-    else
-      remain_list1 = Vector{IndexGroup}()
-    end
-    return boundary, remain_list1
-  end
-  function split_boundary(igs::Vector{IndexGroup}, lists::Vector{Vector{IndexGroup}})
-    if length(igs) <= 1
-      return Vector{IndexGroup}(), igs
-    end
-    for l in lists
-      if length(l) >= 2 && igs[1] == l[1] && igs[2] == l[2]
-        return split_boundary(igs, l)
-      end
-    end
-    return Vector{IndexGroup}(), igs
-  end
-  @timeit_debug ITensors.timer "get_igs_cache_info" begin
-    out, input1, input2 = igs_list
-    contract_out, contract_input1, contract_input2 = contract_igs_list
-    out_left, out_right = split_igs(out, contract_out)
-    out_right = reverse(out_right)
-    input1_left, input1_right = split_igs(input1, contract_input1)
-    input2_left, input2_right = split_igs(input2, contract_input2)
-    inputs = [input1_left, reverse(input1_right), input2_left, reverse(input2_right)]
-    boundary_left, remain_left = split_boundary(out_left, inputs)
-    boundary_right, remain_right = split_boundary(out_right, inputs)
-    return [remain_left..., contract_out..., reverse(remain_right)...],
-    boundary_left,
-    boundary_right
-  end
-end
-
-function get_tn_cache_sub_info(tn_tree::Dict{Vector,ITensor}, cache_binary_trees::Vector)
-  cached_tn = []
-  cached_tn_tree = Dict{Vector,ITensor}()
-  new_igs = []
-  for binary_tree in cache_binary_trees
-    if binary_tree == [] || !haskey(tn_tree, binary_tree)
-      push!(new_igs, nothing)
-    else
-      binary_tree = Vector{Vector}(binary_tree)
-      nodes = topo_sort(binary_tree; type=Vector{<:Vector})
-      sub_tn = [tn_tree[n] for n in nodes]
-      sub_tn_tree = Dict([n => tn_tree[n] for n in nodes]...)
-      index_leaves = vectorize(binary_tree)
-      new_indices = setdiff(noncommoninds(sub_tn...), index_leaves)
-      @assert length(new_indices) == 1
-      new_indices = Vector{<:Index}(new_indices)
-      push!(new_igs, IndexGroup(new_indices))
-      cached_tn = vcat(cached_tn, sub_tn)
-      cached_tn_tree = merge(cached_tn_tree, sub_tn_tree)
-    end
-  end
-  tn = vcat(collect(values(tn_tree))...)
-  uncached_tn = setdiff(tn, cached_tn)
-  return cached_tn_tree, uncached_tn, new_igs
-end
-
-function get_tn_cache_info(
-  ctree_to_tn_tree, ctree_1::Vector, ctree_2::Vector, cache_binary_trees::Vector
-)
-  @timeit_debug ITensors.timer "get_tn_cache_info" begin
-    if haskey(ctree_to_tn_tree, ctree_1) && ctree_to_tn_tree[ctree_1] isa Dict
-      tn_tree_1 = ctree_to_tn_tree[ctree_1]
-      cached_tn_tree1, uncached_tn1, new_igs_1 = get_tn_cache_sub_info(
-        tn_tree_1, cache_binary_trees
-      )
-    else
-      cached_tn_tree1 = Dict{Vector,ITensor}()
-      uncached_tn1 = get_child_tn(ctree_to_tn_tree, ctree_1)
-      new_igs_1 = [nothing, nothing]
-    end
-    if haskey(ctree_to_tn_tree, ctree_2) && ctree_to_tn_tree[ctree_2] isa Dict
-      tn_tree_2 = ctree_to_tn_tree[ctree_2]
-      cached_tn_tree2, uncached_tn2, new_igs_2 = get_tn_cache_sub_info(
-        tn_tree_2, cache_binary_trees
-      )
-    else
-      cached_tn_tree2 = Dict{Vector,ITensor}()
-      uncached_tn2 = get_child_tn(ctree_to_tn_tree, ctree_2)
-      new_igs_2 = [nothing, nothing]
-    end
-    uncached_tn = [uncached_tn1..., uncached_tn2...]
-    new_igs_left = [i for i in [new_igs_1[1], new_igs_2[1]] if i != nothing]
-    @assert length(new_igs_left) <= 1
-    if length(new_igs_left) == 1
-      new_ig_left = new_igs_left[1]
-    else
-      new_ig_left = nothing
-    end
-    new_igs_right = [i for i in [new_igs_1[2], new_igs_2[2]] if i != nothing]
-    @assert length(new_igs_right) <= 1
-    if length(new_igs_right) == 1
-      new_ig_right = new_igs_right[1]
-    else
-      new_ig_right = nothing
-    end
-    return merge(cached_tn_tree1, cached_tn_tree2), uncached_tn, new_ig_left, new_ig_right
   end
 end
 
@@ -416,6 +309,7 @@ function approximate_contract(
   use_cache=true,
   orthogonalize=false,
   algorithm="density_matrix",
+  swap_size=4,
 )
   @timeit_debug ITensors.timer "approximate_contract" begin
     tn_leaves = get_leaves(ctree)
@@ -442,6 +336,11 @@ function approximate_contract(
         tn = vcat(tn1, tn2)
         return [_optcontract(tn)], log_accumulated_norm
       end
+      tree_noswap, ctree_to_adj_tree[c] = minswap_adjacency_tree(
+        ctree_to_adj_tree[c], ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
+      )
+      @info "target_tree", ctree_to_adj_tree[c]
+      @info "tree_noswap", tree_noswap
       # caching is not used here
       if use_cache == false
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
@@ -465,62 +364,91 @@ function approximate_contract(
         [ctree_to_adj_tree[i].children for i in [c, c[1], c[2]]],
         [ctree_to_contract_igs[i] for i in [c, c[1], c[2]]],
       )
-      if ansatz == "comb"
-        cache_binary_tree_left = line_to_tree([
-          line_to_tree(ig_to_linear_order[ig]) for ig in cache_igs_left
-        ])
-        cache_binary_tree_right = line_to_tree([
-          line_to_tree(ig_to_linear_order[ig]) for ig in cache_igs_right
-        ])
-      elseif ansatz == "mps"
-        left_order = vcat([ig_to_linear_order[ig] for ig in cache_igs_left]...)
-        cache_binary_tree_left = line_to_tree(left_order)
-        right_order = vcat([ig_to_linear_order[ig] for ig in reverse(cache_igs_right)]...)
-        cache_binary_tree_right = line_to_tree(reverse(right_order))
-      end
-      cached_tn_tree, uncached_tn, new_ig_left, new_ig_right = get_tn_cache_info(
-        ctree_to_tn_tree, c[1], c[2], [cache_binary_tree_left, cache_binary_tree_right]
-      )
-      if new_ig_right == nothing && new_ig_left == nothing
-        @info "Caching is not used in this approximation"
-        @assert length(cached_tn_tree) == 0
-      else
-        @info "Caching is used in this approximation", new_ig_left, new_ig_right
-      end
-      new_ig_to_binary_tree_pairs = Vector{Pair}()
-      new_igs = center_igs
-      new_ig_to_linear_order = ig_to_linear_order
-      if new_ig_left == nothing
-        new_igs = [cache_igs_left..., new_igs...]
-      else
-        new_ig_to_linear_order = merge(
-          new_ig_to_linear_order, Dict(new_ig_left => [new_ig_left.data])
+      # it's possible that `tree_noswap` has different boundaries than
+      # `ctree_to_adj_tree[c]`
+      if !_has_boundary(tree_noswap.children, cache_igs_left, cache_igs_right)
+        interpolate_igs = _interpolate(
+          tree_noswap.children, ctree_to_adj_tree[c].children; size=swap_size
         )
-        new_igs = [new_ig_left, new_igs...]
-        push!(new_ig_to_binary_tree_pairs, new_ig_left.data => cache_binary_tree_left)
-      end
-      if new_ig_right == nothing
-        new_igs = [new_igs..., cache_igs_right...]
+        tn1 = get_child_tn(ctree_to_tn_tree, c[1])
+        tn2 = get_child_tn(ctree_to_tn_tree, c[2])
+        uncached_tn = [tn1..., tn2...]
+        for (jj, c_igs) in enumerate(interpolate_igs)
+          @info "approximate contract with no cache", jj, c_igs, length(c_igs)
+          if jj == length(interpolate_igs)
+            inds_btree = ordered_igs_to_binary_tree(
+              c_igs, ctree_to_contract_igs[c], ig_to_linear_order; ansatz
+            )
+          else
+            inds_btree = ordered_igs_to_binary_tree(c_igs, ig_to_linear_order; ansatz)
+          end
+          new_tn_tree, log_root_norm = approximate_contract_ctree_to_tensor(
+            uncached_tn, inds_btree; cutoff=cutoff, maxdim=maxdim, algorithm=algorithm
+          )
+          log_accumulated_norm += log_root_norm
+          uncached_tn = vcat(collect(values(new_tn_tree))...)
+        end
+        ctree_to_tn_tree[c] = new_tn_tree
       else
-        new_ig_to_linear_order = merge(
-          new_ig_to_linear_order, Dict(new_ig_right => [new_ig_right.data])
+        noswap_center_igs = _get_center_igs(
+          tree_noswap.children, cache_igs_left, cache_igs_right
         )
-        new_igs = [new_igs..., new_ig_right]
-        push!(new_ig_to_binary_tree_pairs, new_ig_right.data => cache_binary_tree_right)
+        interpolate_center_igs = _interpolate(noswap_center_igs, center_igs; size=swap_size)
+        @info "interpolate_center_igs has size", length(interpolate_center_igs)
+        @assert interpolate_center_igs[end] == center_igs
+        cached_tn_tree, uncached_tn, new_ig_left, new_ig_right = get_tn_cache_info(
+          ctree_to_tn_tree,
+          c[1],
+          c[2],
+          cache_igs_left,
+          cache_igs_right,
+          ig_to_linear_order;
+          ansatz,
+        )
+        if new_ig_right == nothing && new_ig_left == nothing
+          @info "Caching is not used in this approximation"
+          @assert length(cached_tn_tree) == 0
+        else
+          @info "Caching is used in this approximation", new_ig_left, new_ig_right
+        end
+        new_ig_to_linear_order = _cached_ig_to_linear_order(
+          new_ig_left, new_ig_right, ig_to_linear_order
+        )
+        new_index_to_btree = _cached_new_index_to_btree(
+          cache_igs_left,
+          cache_igs_right,
+          new_ig_left,
+          new_ig_right,
+          ig_to_linear_order;
+          ansatz,
+        )
+        new_tn_tree = nothing
+        for (jj, c_igs) in enumerate(interpolate_center_igs)
+          contract_igs = _cached_ig_order(
+            c_igs, cache_igs_left, cache_igs_right, new_ig_left, new_ig_right
+          )
+          @info "approximate contract", jj
+          if jj == length(interpolate_center_igs)
+            inds_btree = ordered_igs_to_binary_tree(
+              contract_igs, ctree_to_contract_igs[c], new_ig_to_linear_order; ansatz
+            )
+          else
+            inds_btree = ordered_igs_to_binary_tree(
+              contract_igs, new_ig_to_linear_order; ansatz
+            )
+          end
+          # @info "start approximate_contract_ctree_to_tensor"
+          new_tn_tree, log_root_norm = approximate_contract_ctree_to_tensor(
+            uncached_tn, inds_btree; cutoff=cutoff, maxdim=maxdim, algorithm=algorithm
+          )
+          log_accumulated_norm += log_root_norm
+          uncached_tn = vcat(collect(values(new_tn_tree))...)
+        end
+        if length(new_index_to_btree) != 0
+          update_tn_tree_keys!(new_tn_tree, inds_btree, new_index_to_btree)
+        end
+        ctree_to_tn_tree[c] = merge(new_tn_tree, cached_tn_tree)
       end
-      # TODO: change new_igs into a vector of igs
-      @info "approximate contract", new_igs, length(new_igs)
-      inds_btree = ordered_igs_to_binary_tree(
-        new_igs, ctree_to_contract_igs[c], new_ig_to_linear_order; ansatz=ansatz
-      )
-      new_tn_tree, log_root_norm = approximate_contract_ctree_to_tensor(
-        uncached_tn, inds_btree; cutoff=cutoff, maxdim=maxdim, algorithm=algorithm
-      )
-      log_accumulated_norm += log_root_norm
-      if length(new_ig_to_binary_tree_pairs) != 0
-        update_tn_tree_keys!(new_tn_tree, inds_btree, new_ig_to_binary_tree_pairs)
-      end
-      ctree_to_tn_tree[c] = merge(new_tn_tree, cached_tn_tree)
       # release the memory
       delete!(ctree_to_tn_tree, c[1])
       delete!(ctree_to_tn_tree, c[2])

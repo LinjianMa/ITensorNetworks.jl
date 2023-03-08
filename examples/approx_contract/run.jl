@@ -55,44 +55,47 @@ Bugs
 #=
 bench_3d_cube_lnZ
 =#
-N = (5, 5, 5)
+N = (6, 6, 6)
 beta = 0.3
 network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
-tntree = build_tntree(N, network; block_size=(1, 1, 1), snake=false, env_size=(1, 1, 1))
+tntree = build_tntree(N, network; block_size=(1, 1, 1), snake=false, env_size=(3, 1, 1))
 @time bench_lnZ(
   tntree;
-  num_iter=2,
+  num_iter=1,
   cutoff=1e-12,
-  maxdim=64,
+  maxdim=256,
   ansatz="mps",
   algorithm="density_matrix",
   use_cache=true,
   ortho=false,
+  swap_size=10000,
 )
 
 #=
 bench_3d_cube_magnetization
 =#
-# N = (1, 6, 6)
-# beta = 0.44
-# h = 0.0001
-# szverts = [(1, 3, 3)]
+# N = (6, 6, 6)
+# beta = 0.22
+# h = 0.050
+# szverts = [(3, 3, 3)]
 # network1 = ising_network(named_grid(N), beta; h=h, szverts=szverts)
 # network2 = ising_network(named_grid(N), beta; h=h, szverts=nothing)
 # # e1 = exact_contract(network1; sc_target=28)
 # # e2 = exact_contract(network2; sc_target=28)
 # # @info exp(e1[2] - e2[2])
-# tntree1 = build_tntree(N, network1; block_size=(1, 1, 1), snake=false, env_size=(1, 6, 1))
-# tntree2 = build_tntree(N, network2; block_size=(1, 1, 1), snake=false, env_size=(1, 6, 1))
+# tntree1 = build_tntree(N, network1; block_size=(1, 1, 1), snake=false, env_size=(3, 1, 1))
+# tntree2 = build_tntree(N, network2; block_size=(1, 1, 1), snake=false, env_size=(3, 1, 1))
 # @time bench_magnetization(
 #   tntree1 => tntree2;
-#   num_iter=2,
+#   num_iter=1,
 #   cutoff=1e-12,
-#   maxdim=64,
+#   maxdim=256,
 #   ansatz="mps",
 #   algorithm="density_matrix",
 #   use_cache=true,
 #   ortho=false,
+#   swap_size=10000,
+#   warmup=false,
 # )
 
 #=
@@ -133,4 +136,5 @@ random regular graph
 #   algorithm="density_matrix",
 #   use_cache=true,
 #   ortho=false,
+#   swap_size=4,
 # )

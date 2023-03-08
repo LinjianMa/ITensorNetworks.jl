@@ -338,46 +338,61 @@ function minswap_adjacency_tree!(
   return num_adj_swaps(adj_tree.children, input_tree.children)
 end
 
+function _merge(left_lists, right_lists)
+  out_lists = []
+  for l in left_lists
+    for r in right_lists
+      push!(out_lists, IndexAdjacencyTree([l..., r...], true))
+    end
+  end
+  return out_lists
+end
+
+function _merge(l1_left, l1_right, l2_left, l2_right)
+  left_lists = [[l2_left..., l1_left...], [l1_left..., l2_left...]]
+  right_lists = [[l2_right..., l1_right...], [l1_right..., l2_right...]]
+  return _merge(left_lists, right_lists)
+end
+
+function _low_swap_merge(l1_left, l1_right, l2_left, l2_right)
+  if length(l1_left) < length(l2_left)
+    left_lists = [[l2_left..., l1_left...]]
+  elseif length(l1_left) > length(l2_left)
+    left_lists = [[l1_left..., l2_left...]]
+  else
+    left_lists = [[l2_left..., l1_left...], [l1_left..., l2_left...]]
+  end
+  if length(l1_right) < length(l2_right)
+    right_lists = [[l1_right..., l2_right...]]
+  elseif length(l1_right) > length(l2_right)
+    right_lists = [[l2_right..., l1_right...]]
+  else
+    right_lists = [[l2_right..., l1_right...], [l1_right..., l2_right...]]
+  end
+  return _merge(left_lists, right_lists)
+end
+
 """
 Given an `adj_tree` and two input adj trees, `input_tree1`, `input_tree2`,
 return two adj trees, `tree1` and `tree2`, where `tree1` is a simple concatenation of
 `input_tree1` and `input_tree2`, and `tree2` satisfy the constraints in `adj_tree`
 and has the minimin number of swaps w.r.t. `tree1`.
 """
-function minswap_adjacency_trees(
+function minswap_adjacency_tree(
   adj_tree::IndexAdjacencyTree,
   input_tree1::IndexAdjacencyTree,
   input_tree2::IndexAdjacencyTree,
 )
-  function merge(l1_left, l1_right, l2_left, l2_right)
-    if length(l1_left) < length(l2_left)
-      left_lists = [[l2_left..., l1_left...]]
-    elseif length(l1_left) > length(l2_left)
-      left_lists = [[l1_left..., l2_left...]]
-    else
-      left_lists = [[l2_left..., l1_left...], [l1_left..., l2_left...]]
-    end
-    if length(l1_right) < length(l2_right)
-      right_lists = [[l1_right..., l2_right...]]
-    elseif length(l1_right) > length(l2_right)
-      right_lists = [[l2_right..., l1_right...]]
-    else
-      right_lists = [[l2_right..., l1_right...], [l1_right..., l2_right...]]
-    end
-    out_lists = []
-    for l in left_lists
-      for r in right_lists
-        push!(out_lists, IndexAdjacencyTree([l..., r...], true))
-      end
-    end
-    return out_lists
-  end
   @timeit_debug ITensors.timer "minswap_adjacency_tree" begin
     leaves_1 = get_adj_tree_leaves(input_tree1)
     leaves_2 = get_adj_tree_leaves(input_tree2)
     inter_igs = intersect(leaves_1, leaves_2)
     leaves_1_left, leaves_1_right = split_igs(leaves_1, inter_igs)
     leaves_2_left, leaves_2_right = split_igs(leaves_2, inter_igs)
+    @info "leaves_1_left", leaves_1_left
+    @info "leaves_1_right", leaves_1_right
+    @info "leaves_2_left", leaves_2_left
+    @info "leaves_2_right", leaves_2_right
     num_swaps_1 =
       min(length(leaves_1_left), length(leaves_2_left)) +
       min(length(leaves_1_right), length(leaves_2_right))
@@ -385,31 +400,52 @@ function minswap_adjacency_trees(
       min(length(leaves_1_left), length(leaves_2_right)) +
       min(length(leaves_1_right), length(leaves_2_left))
     if num_swaps_1 == num_swaps_2
-      inputs_1 = merge(leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right)
-      inputs_2 = merge(
+      inputs_1 = _low_swap_merge(
+        leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right
+      )
+      inputs_2 = _low_swap_merge(
         leaves_1_left, leaves_1_right, reverse(leaves_2_right), reverse(leaves_2_left)
       )
       inputs = [inputs_1..., inputs_2...]
     elseif num_swaps_1 > num_swaps_2
-      inputs = merge(
+      inputs = _low_swap_merge(
         leaves_1_left, leaves_1_right, reverse(leaves_2_right), reverse(leaves_2_left)
       )
     else
-      inputs = merge(leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right)
+      inputs = _low_swap_merge(leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right)
     end
-    # TODO: may want to change this back
-    # leaves_1 = [i for i in leaves_1 if !(i in inter_igs)]
-    # leaves_2 = [i for i in leaves_2 if !(i in inter_igs)]
-    # input1 = IndexAdjacencyTree([leaves_1..., leaves_2...], true, true)
-    # input2 = IndexAdjacencyTree([leaves_1..., reverse(leaves_2)...], true, true)
-    # input3 = IndexAdjacencyTree([reverse(leaves_1)..., leaves_2...], true, true)
-    # input4 = IndexAdjacencyTree([reverse(leaves_1)..., reverse(leaves_2)...], true, true)
-    # inputs = [input1, input2, input3, input4]
-    # ======================================
     adj_tree_copies = [copy(adj_tree) for _ in 1:length(inputs)]
     nswaps = [minswap_adjacency_tree!(t, i) for (t, i) in zip(adj_tree_copies, inputs)]
-    tree1 = inputs[argmin(nswaps)]
-    tree2 = adj_tree_copies[argmin(nswaps)]
-    return tree1, tree2
+    return inputs[argmin(nswaps)], adj_tree_copies[argmin(nswaps)]
   end
+end
+
+function _permute(v::Vector, perms)
+  v = copy(v)
+  for p in perms
+    temp = v[p]
+    v[p] = v[p + 1]
+    v[p + 1] = temp
+  end
+  return v
+end
+
+"""
+Given `igs1` and `igs2`, generate a list of igs that evenly split
+`igs1` and `igs2` based on the adjacent swap distance.
+"""
+function _interpolate(igs1::Vector{IndexGroup}, igs2::Vector{IndexGroup}; size)
+  if igs1 == igs2
+    return [igs2]
+  end
+  perms_list = collect(Iterators.partition(bubble_sort(igs1, igs2), size))
+  @info "perms_list", perms_list
+  out_igs_list = []
+  current_igs = igs1
+  for perms in perms_list
+    igs = _permute(current_igs, perms)
+    push!(out_igs_list, igs)
+    current_igs = igs
+  end
+  return out_igs_list
 end

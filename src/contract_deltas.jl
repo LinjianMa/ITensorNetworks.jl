@@ -93,7 +93,7 @@ function _contract_deltas(tn::ITensorNetwork)
   # We copy it here so that the enumeration won't be affected.
   for v in copy(vertices(tn))
     if !is_delta(tn[v])
-      tn[v] = replaceinds(tn[v], deltainds => sim_deltainds)
+      tn[v] = replaceinds(tn[v], Dict(deltainds .=> sim_deltainds))
       continue
     end
     i1, i2 = inds(tn[v])

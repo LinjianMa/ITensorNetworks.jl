@@ -205,6 +205,8 @@ function _optcontract(network::Vector)
       return ITensor(1.0)
     end
     @assert network isa Vector{ITensor}
+    # @info "length(network)", length(network)
+    # @info "noncommoninds(network...)", noncommoninds(network...)
     @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: contraction_sequence" begin
       seq = contraction_sequence(network; alg="sa_bipartite")
     end
@@ -215,13 +217,13 @@ end
 
 function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
   t00 = time()
-  @info "eigen input size", size(tensor)
+  # @info "eigen input size", size(tensor)
   @assert length(inds(tensor)) <= 4
   @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
     diag, U = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
   end
   t11 = time() - t00
-  @info "size of U", size(U), "size of diag", size(diag), "costs", t11
+  # @info "size of U", size(U), "size of diag", size(diag), "costs", t11
   return U
 end
 
@@ -249,7 +251,7 @@ function _sim(partial_dm_tensor::ITensor, inds_to_siminds)
   reorder_siminds = vcat(
     [inds_to_siminds[i] for i in indices], [siminds_to_inds[i] for i in simindices]
   )
-  return replaceinds(partial_dm_tensor, reorder_inds => reorder_siminds)
+  return replaceinds(partial_dm_tensor, Dict(reorder_inds .=> reorder_siminds))
 end
 
 """
