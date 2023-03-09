@@ -80,10 +80,10 @@ function get_tn_cache_info(
 )
   @assert ansatz in ["comb", "mps"]
   cache_binary_tree_left = ordered_igs_to_binary_tree(
-    cache_igs_left, ig_to_linear_order; ansatz
+    cache_igs_left, ig_to_linear_order; ansatz=ansatz, direction="left"
   )
   cache_binary_tree_right = ordered_igs_to_binary_tree(
-    cache_igs_right, ig_to_linear_order; ansatz
+    cache_igs_right, ig_to_linear_order; ansatz=ansatz, direction="right"
   )
   cache_binary_trees = [cache_binary_tree_left, cache_binary_tree_right]
   @timeit_debug ITensors.timer "get_tn_cache_info" begin
@@ -163,10 +163,10 @@ function _cached_new_index_to_btree(
 )
   @assert ansatz in ["comb", "mps"]
   cache_binary_tree_left = ordered_igs_to_binary_tree(
-    cache_igs_left, ig_to_linear_order; ansatz
+    cache_igs_left, ig_to_linear_order; ansatz=ansatz, direction="left"
   )
   cache_binary_tree_right = ordered_igs_to_binary_tree(
-    cache_igs_right, ig_to_linear_order; ansatz
+    cache_igs_right, ig_to_linear_order; ansatz=ansatz, direction="right"
   )
   new_index_to_btree = Vector{Pair}()
   if new_ig_left != nothing

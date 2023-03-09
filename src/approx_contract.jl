@@ -167,13 +167,21 @@ function ordered_igs_to_binary_tree(ordered_igs, contract_igs, ig_to_linear_orde
   end
 end
 
-function ordered_igs_to_binary_tree(igs, ig_to_linear_order; ansatz)
+function ordered_igs_to_binary_tree(igs, ig_to_linear_order; ansatz, direction)
   @assert ansatz in ["comb", "mps"]
+  @assert direction in ["left", "right"]
   if ansatz == "comb"
     return line_to_tree([line_to_tree(ig_to_linear_order[ig]) for ig in igs])
   end
-  order = vcat([ig_to_linear_order[ig] for ig in igs]...)
-  return line_to_tree(order)
+  if direction == "left"
+    order = vcat([ig_to_linear_order[ig] for ig in igs]...)
+    return line_to_tree(order)
+  else
+    # First reverse get the order from middle to boundary,
+    # and second reverse get the overall inds order from boundary to middle.
+    order = vcat([ig_to_linear_order[ig] for ig in reverse(igs)]...)
+    return line_to_tree(reverse(order))
+  end
 end
 
 function ordered_igs_to_binary_tree_mps(
@@ -193,11 +201,15 @@ end
 function ordered_igs_to_binary_tree_comb(
   left_igs, right_igs, contract_igs, ig_to_linear_order
 )
-  tree_1 = ordered_igs_to_binary_tree(left_igs, ig_to_linear_order; ansatz="comb")
-  tree_contract = ordered_igs_to_binary_tree(
-    contract_igs, ig_to_linear_order; ansatz="comb"
+  tree_1 = ordered_igs_to_binary_tree(
+    left_igs, ig_to_linear_order; ansatz="comb", direction="left"
   )
-  tree_2 = ordered_igs_to_binary_tree(reverse(right_igs), ig_to_linear_order; ansatz="comb")
+  tree_contract = ordered_igs_to_binary_tree(
+    contract_igs, ig_to_linear_order; ansatz="comb", direction="left"
+  )
+  tree_2 = ordered_igs_to_binary_tree(
+    reverse(right_igs), ig_to_linear_order; ansatz="comb", direction="left"
+  )
   # make the binary tree more balanced to save tree approximation cost
   if tree_1 == []
     return merge_tree(merge_tree(tree_1, tree_contract), tree_2)
@@ -360,6 +372,8 @@ function approximate_contract(
       end
       # caching
       # Note: cache_igs_right has a reversed ordering
+      # TODO: this reversed ordering actually cause multiple problems
+      # Below. We need to change it back.
       center_igs, cache_igs_left, cache_igs_right = get_igs_cache_info(
         [ctree_to_adj_tree[i].children for i in [c, c[1], c[2]]],
         [ctree_to_contract_igs[i] for i in [c, c[1], c[2]]],
@@ -380,7 +394,9 @@ function approximate_contract(
               c_igs, ctree_to_contract_igs[c], ig_to_linear_order; ansatz
             )
           else
-            inds_btree = ordered_igs_to_binary_tree(c_igs, ig_to_linear_order; ansatz)
+            inds_btree = ordered_igs_to_binary_tree(
+              c_igs, ig_to_linear_order; ansatz=ansatz, direction="left"
+            )
           end
           new_tn_tree, log_root_norm = approximate_contract_ctree_to_tensor(
             uncached_tn, inds_btree; cutoff=cutoff, maxdim=maxdim, algorithm=algorithm
@@ -434,7 +450,7 @@ function approximate_contract(
             )
           else
             inds_btree = ordered_igs_to_binary_tree(
-              contract_igs, new_ig_to_linear_order; ansatz
+              contract_igs, new_ig_to_linear_order; ansatz=ansatz, direction="left"
             )
           end
           # @info "start approximate_contract_ctree_to_tensor"
