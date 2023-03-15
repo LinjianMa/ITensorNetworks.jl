@@ -66,14 +66,7 @@ Example:
   9 /
   |/
   1
-"""
-struct _DensityMatrix
-  tensor::ITensor
-  root::Union{<:Number,Tuple}
-  children::Vector
-end
 
-"""
 The struct is used to store cached partial density matrices in `approx_binary_tree_itensornetwork`.
   tensor: the cached partial density matric tensor
   root: the root vertex of which the partial density matrix tensor is computed
@@ -135,14 +128,14 @@ The struct contains cached density matrices and cached partial density matrices
 for each vertex in the tensor network.
 """
 struct _DensityMatrixAlgCaches
-  v_to_cdm::Dict{Union{<:Number,Tuple},_DensityMatrix}
+  e_to_dm::Dict{NamedEdge,ITensor}
   v_to_cpdms::Dict{Union{<:Number,Tuple},Vector{_PartialDensityMatrix}}
 end
 
 function _DensityMatrixAlgCaches()
-  v_to_cdm = Dict{Union{<:Number,Tuple},_DensityMatrix}()
+  e_to_dm = Dict{NamedEdge,ITensor}()
   v_to_cpdms = Dict{Union{<:Number,Tuple},Vector{_PartialDensityMatrix}}()
-  return _DensityMatrixAlgCaches(v_to_cdm, v_to_cpdms)
+  return _DensityMatrixAlgCaches(e_to_dm, v_to_cpdms)
 end
 
 """
@@ -271,7 +264,7 @@ function _get_pdm(
 end
 
 """
-Update `caches.v_to_cdm[v]` and `caches.v_to_cpdms[v]`.
+Update `caches.e_to_dm[e]` and `caches.v_to_cpdms[v]`.
   caches: the caches of the density matrix algorithm.
   v: the density matrix root
   children: the children vertices of `v` in the dfs_tree
@@ -281,17 +274,16 @@ Update `caches.v_to_cdm[v]` and `caches.v_to_cpdms[v]`.
 """
 function _update!(
   caches::_DensityMatrixAlgCaches,
-  v::Union{<:Number,Tuple},
+  edge::NamedEdge,
   children::Vector,
-  root::Union{<:Number,Tuple},
   network::Vector{ITensor},
   inds_to_sim,
 )
-  if haskey(caches.v_to_cdm, v) && caches.v_to_cdm[v].children == children && v != root
-    @assert haskey(caches.v_to_cdm, v)
+  v = edge.dst
+  if haskey(caches.e_to_dm, edge)
     return nothing
   end
-  child_to_dm = [c => caches.v_to_cdm[c].tensor for c in children]
+  child_to_dm = [c => caches.e_to_dm[NamedEdge(v, c)] for c in children]
   if !haskey(caches.v_to_cpdms, v)
     caches.v_to_cpdms[v] = []
   end
@@ -309,7 +301,7 @@ function _update!(
     simtensor = _sim(cpdms[2].tensor, inds_to_sim)
     density_matrix = _optcontract([cpdms[1].tensor, simtensor])
   end
-  caches.v_to_cdm[v] = _DensityMatrix(density_matrix, v, children)
+  caches.e_to_dm[edge] = density_matrix
   caches.v_to_cpdms[v] = cpdms
   return nothing
 end
@@ -349,10 +341,16 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
     children = sort(child_vertices(dm_dfs_tree, v))
     @assert length(children) <= 2
     network = Vector{ITensor}(alg_graph.partition[v])
-    _update!(caches, v, children, root, Vector{ITensor}(network), inds_to_sim)
+    _update!(
+      caches,
+      NamedEdge(parent_vertex(dm_dfs_tree, v), v),
+      children,
+      Vector{ITensor}(network),
+      inds_to_sim,
+    )
   end
   U = _get_low_rank_projector(
-    caches.v_to_cdm[root].tensor,
+    caches.e_to_dm[NamedEdge(nothing, root)],
     collect(values(outinds_root_to_sim)),
     collect(keys(outinds_root_to_sim));
     kwargs...,
@@ -376,6 +374,12 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
     _PartialDensityMatrix(_optcontract([cpdm.tensor, root_tensor]), new_root, cpdm.child)
     for cpdm in caches.v_to_cpdms[new_root]
   ]
+  # update e_to_dm
+  for edge in keys(caches.e_to_dm)
+    if edge.dst in [root, new_root]
+      delete!(caches.e_to_dm, edge)
+    end
+  end
   return U
 end
 
