@@ -324,18 +324,29 @@ function minswap_adjacency_tree!(
     # its ordering is fixed so we don't optimize that.
     if node.fixed_order
       perms = [children_tree, reverse(children_tree)]
+      nswaps = []
+      for perm in perms
+        push!(nswaps, num_adj_swaps(vcat(perm...), input_order))
+      end
+      children_tree = perms[argmin(nswaps)]
     else
-      perms = collect(permutations(children_tree))
+      children_tree = _best_perm_greedy(children_tree, input_order)
     end
-    nswaps = []
-    for perm in perms
-      push!(nswaps, num_adj_swaps(vcat(perm...), input_order))
-    end
-    children_tree = perms[argmin(nswaps)]
     node.children = vcat(children_tree...)
     node.fixed_order = true
   end
   return num_adj_swaps(adj_tree.children, input_tree.children)
+end
+
+function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector)
+  ordered_vs = [vs[1]]
+  for v in vs[2:end]
+    perms = [insert!(copy(ordered_vs), i, v) for i in 1:(length(ordered_vs) + 1)]
+    suborder = [n for n in order if n in vcat(perms[1]...)]
+    nswaps = [num_adj_swaps(vcat(p...), suborder) for p in perms]
+    ordered_vs = perms[argmin(nswaps)]
+  end
+  return ordered_vs
 end
 
 function _merge(left_lists, right_lists)
