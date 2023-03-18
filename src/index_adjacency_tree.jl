@@ -311,6 +311,9 @@ function minswap_adjacency_tree!(adj_tree::IndexAdjacencyTree)
   return adj_tree.fixed_order = true
 end
 
+"""
+Inplace change `adj_tree` so that its children will be an order of its igs.
+"""
 function minswap_adjacency_tree!(
   adj_tree::IndexAdjacencyTree, input_tree::IndexAdjacencyTree
 )
@@ -400,10 +403,13 @@ function minswap_adjacency_tree(
     inter_igs = intersect(leaves_1, leaves_2)
     leaves_1_left, leaves_1_right = split_igs(leaves_1, inter_igs)
     leaves_2_left, leaves_2_right = split_igs(leaves_2, inter_igs)
-    @info "leaves_1_left", leaves_1_left
-    @info "leaves_1_right", leaves_1_right
-    @info "leaves_2_left", leaves_2_left
-    @info "leaves_2_right", leaves_2_right
+    @info "lengths of the input partitions",
+    sort([
+      length(leaves_1_left),
+      length(leaves_1_right),
+      length(leaves_2_left),
+      length(leaves_2_right),
+    ])
     num_swaps_1 =
       min(length(leaves_1_left), length(leaves_2_left)) +
       min(length(leaves_1_right), length(leaves_2_right))

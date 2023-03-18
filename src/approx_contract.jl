@@ -127,15 +127,6 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
         ctree_to_adj_tree[c] = adj_tree
       end
     end
-    # mapping each contraction tree to its contract igs
-    ctree_to_contract_igs = Dict{Vector,Vector{IndexGroup}}()
-    for c in ctrees
-      contract_igs = intersect(ctree_to_igs[c[1]], ctree_to_igs[c[2]])
-      ctree_to_contract_igs[c[1]] = contract_igs
-      ctree_to_contract_igs[c[2]] = contract_igs
-    end
-    # special case when the network contains uncontracted inds
-    ctree_to_contract_igs[ctrees[end]] = ctree_to_igs[ctrees[end]]
     # mapping each index group to a linear ordering
     ig_to_linear_order = Dict{IndexGroup,Vector}()
     for leaf in tn_leaves
@@ -146,7 +137,7 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
         end
       end
     end
-    return ctree_to_igs, ctree_to_adj_tree, ctree_to_contract_igs, ig_to_linear_order
+    return ctree_to_igs, ctree_to_adj_tree, ig_to_linear_order
   end
 end
 
@@ -327,20 +318,57 @@ function approximate_contract(
     tn_leaves = get_leaves(ctree)
     environments = tn_leaves
     ctrees = topo_sort(ctree; leaves=tn_leaves)
-    ctree_to_igs, ctree_to_adj_tree, ctree_to_contract_igs, ig_to_linear_order = _approximate_contract_pre_process(
+    ctree_to_igs, ctree_to_adj_tree, ig_to_linear_order = _approximate_contract_pre_process(
       tn_leaves, ctrees
     )
+    ctree_to_noswap_tree = Dict{Vector,IndexAdjacencyTree}()
+    for (ii, c) in enumerate(ctrees)
+      @info "$(ii)/$(length(ctrees))", "th pre-process"
+      if ctree_to_igs[c] == []
+        continue
+      end
+      ctree_to_noswap_tree[c], ctree_to_adj_tree[c] = minswap_adjacency_tree(
+        ctree_to_adj_tree[c], ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
+      )
+    end
+    # mapping each contraction tree to its contract igs
+    ctree_to_contract_igs = Dict{Vector,Vector{IndexGroup}}()
+    for c in ctrees
+      if c[1] in tn_leaves
+        contract_igs = intersect(
+          ctree_to_adj_tree[c[2]].children, ctree_to_adj_tree[c[1]].children
+        )
+        l_igs_c1, r_igs_c1 = split_igs(ctree_to_adj_tree[c[1]].children, contract_igs)
+        ctree_to_adj_tree[c[1]].children = Vector{IndexGroup}([
+          l_igs_c1..., contract_igs..., r_igs_c1...
+        ])
+      else
+        contract_igs = intersect(
+          ctree_to_adj_tree[c[1]].children, ctree_to_adj_tree[c[2]].children
+        )
+        l_igs_c2, r_igs_c2 = split_igs(ctree_to_adj_tree[c[2]].children, contract_igs)
+        ctree_to_adj_tree[c[2]].children = Vector{IndexGroup}([
+          l_igs_c2..., contract_igs..., r_igs_c2...
+        ])
+      end
+      ctree_to_contract_igs[c[1]] = contract_igs
+      ctree_to_contract_igs[c[2]] = contract_igs
+    end
+    # special case when the network contains uncontracted inds
+    if haskey(ctree_to_adj_tree, ctrees[end])
+      ctree_to_contract_igs[ctrees[end]] = ctree_to_adj_tree[ctrees[end]].children
+    end
     # mapping each contraction tree to a tensor network
     ctree_to_tn_tree = Dict{Vector,Union{Dict{Vector,ITensor},Vector{ITensor}}}()
     # accumulate norm
     log_accumulated_norm = 0.0
     for (ii, c) in enumerate(ctrees)
-      @info "orthogonalize", orthogonalize
+      t00 = time()
       if orthogonalize == true
         orthogonalize!(ctree_to_tn_tree, environments, c)
         environments = setdiff(environments, c)
       end
-      @info ii, "th tree approximation"
+      @info "$(ii)/$(length(ctrees))", "th tree approximation"
       if ctree_to_igs[c] == []
         @assert c == ctrees[end]
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
@@ -348,11 +376,6 @@ function approximate_contract(
         tn = vcat(tn1, tn2)
         return [_optcontract(tn)], log_accumulated_norm
       end
-      tree_noswap, ctree_to_adj_tree[c] = minswap_adjacency_tree(
-        ctree_to_adj_tree[c], ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
-      )
-      @info "target_tree", ctree_to_adj_tree[c]
-      @info "tree_noswap", tree_noswap
       # caching is not used here
       if use_cache == false
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
@@ -380,15 +403,15 @@ function approximate_contract(
       )
       # it's possible that `tree_noswap` has different boundaries than
       # `ctree_to_adj_tree[c]`
-      if !_has_boundary(tree_noswap.children, cache_igs_left, cache_igs_right)
+      if !_has_boundary(ctree_to_noswap_tree[c].children, cache_igs_left, cache_igs_right)
         interpolate_igs = _interpolate(
-          tree_noswap.children, ctree_to_adj_tree[c].children; size=swap_size
+          ctree_to_noswap_tree[c].children, ctree_to_adj_tree[c].children; size=swap_size
         )
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
         uncached_tn = [tn1..., tn2...]
         for (jj, c_igs) in enumerate(interpolate_igs)
-          @info "approximate contract with no cache", jj, c_igs, length(c_igs)
+          @info "approximate contract with no cache", jj
           if jj == length(interpolate_igs)
             inds_btree = ordered_igs_to_binary_tree(
               c_igs, ctree_to_contract_igs[c], ig_to_linear_order; ansatz
@@ -407,7 +430,7 @@ function approximate_contract(
         ctree_to_tn_tree[c] = new_tn_tree
       else
         noswap_center_igs = _get_center_igs(
-          tree_noswap.children, cache_igs_left, cache_igs_right
+          ctree_to_noswap_tree[c].children, cache_igs_left, cache_igs_right
         )
         interpolate_center_igs = _interpolate(noswap_center_igs, center_igs; size=swap_size)
         @info "interpolate_center_igs has size", length(interpolate_center_igs)
@@ -468,6 +491,8 @@ function approximate_contract(
       # release the memory
       delete!(ctree_to_tn_tree, c[1])
       delete!(ctree_to_tn_tree, c[2])
+      t11 = time() - t00
+      @info "time of this contraction is", t11
     end
     tn = vcat(collect(values(ctree_to_tn_tree[ctrees[end]]))...)
     return tn, log_accumulated_norm
