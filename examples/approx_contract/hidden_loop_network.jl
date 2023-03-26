@@ -1,7 +1,6 @@
 using ITensors, Graphs, NamedGraphs, TimerOutputs
 using Distributions, Random, DataStructures
 using KaHyPar
-using ITensors: contract
 using ITensorNetworks
 using ITensorNetworks: delta_network, _delta_inds_disjointsets
 using Random
@@ -38,13 +37,15 @@ function random_corner_double_network(N::Tuple)
       push!(ts, delta_tn[(v, i)])
     end
     add_vertex!(out_tn, v)
-    out_tn[v] = contract(ts...)
+    out_tn[v] = ITensors.contract(ts...)
   end
   @info out_tn
   return delta_tn, out_tn
 end
 
-N = (8, 8, 1)
+N = (15, 15)
+block_size = (1, 1)
+env_size = (8, 1)
 delta_tn, tn = random_corner_double_network(N)
 ds = _delta_inds_disjointsets(Vector{ITensor}(delta_tn), Vector{Index}())
 deltainds = [ds...]
@@ -54,12 +55,12 @@ roots = [find_root!(ds, i) for i in deltainds]
 @info length(countmap(roots))
 @info length(countmap(roots)) * log(2)
 
-tntree = build_tntree(N, tn; block_size=(1, 1, 1), snake=false, env_size=(5, 1, 1))
+tntree = build_tntree(N, tn; block_size=block_size, env_size=env_size)
 @time bench_lnZ(
   tntree;
   num_iter=1,
   cutoff=1e-12,
-  maxdim=64,
+  maxdim=128,
   ansatz="mps",
   algorithm="density_matrix",
   use_cache=true,
