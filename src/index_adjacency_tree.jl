@@ -457,7 +457,7 @@ function _interpolate(igs1::Vector{IndexGroup}, igs2::Vector{IndexGroup}; size)
   end
   perms_list = collect(Iterators.partition(bubble_sort(igs1, igs2), size))
   @info "perms_list", perms_list
-  out_igs_list = []
+  out_igs_list = [igs1]
   current_igs = igs1
   for perms in perms_list
     igs = _permute(current_igs, perms)
