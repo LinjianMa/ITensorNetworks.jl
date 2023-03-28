@@ -188,11 +188,12 @@ function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
   # @info "eigen input size", size(tensor)
   @assert length(inds(tensor)) <= 4
   @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
-    diag, U = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
+    F = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
+    D, U, Ut = F.D, F.V, F.Vt
   end
   t11 = time() - t00
   # @info "size of U", size(U), "size of diag", size(diag), "costs", t11
-  return U
+  return Ut
 end
 
 """
@@ -253,12 +254,15 @@ function _update!(
   end
   if length(pdms) == 0
     sim_network = map(x -> replaceinds(x, inds_to_sim), network)
+    sim_network = map(dag, sim_network)
     density_matrix = _optcontract([network..., sim_network...])
   elseif length(pdms) == 1
     sim_network = map(x -> replaceinds(x, inds_to_sim), network)
+    sim_network = map(dag, sim_network)
     density_matrix = _optcontract([pdms[1], sim_network...])
   else
     simtensor = _sim(pdms[2], inds_to_sim)
+    simtensor = dag(simtensor)
     density_matrix = _optcontract([pdms[1], simtensor])
   end
   caches.e_to_dm[edge] = density_matrix
@@ -310,12 +314,12 @@ function _rem_vertex!(alg_graph::_DensityMartrixAlgGraph, root; kwargs...)
   end
   U = _get_low_rank_projector(
     caches.e_to_dm[NamedEdge(nothing, root)],
-    collect(values(outinds_root_to_sim)),
-    collect(keys(outinds_root_to_sim));
+    collect(keys(outinds_root_to_sim)),
+    collect(values(outinds_root_to_sim));
     kwargs...,
   )
   # update partition and out_tree
-  root_tensor = _optcontract([Vector{ITensor}(alg_graph.partition[root])..., U])
+  root_tensor = _optcontract([Vector{ITensor}(alg_graph.partition[root])..., dag(U)])
   new_root = child_vertices(dm_dfs_tree, root)[1]
   alg_graph.partition[new_root] = disjoint_union(
     alg_graph.partition[new_root], ITensorNetwork([root_tensor])
