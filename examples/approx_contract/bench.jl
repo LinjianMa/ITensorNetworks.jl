@@ -1,3 +1,5 @@
+using ITensorNetworks: approximate_contract
+
 function bench_lnZ(
   tntree; num_iter, cutoff, maxdim, ansatz, algorithm, use_cache, ortho, swap_size
 )
@@ -14,7 +16,8 @@ function bench_lnZ(
       swap_size=swap_size,
     )
     log_acc_norm = log(norm(out)) + log_acc_norm
-    @info "out is", log_acc_norm
+    @info "out value is", out[1].tensor
+    @info "out norm is", log_acc_norm
     return log_acc_norm
   end
   out_list = []

@@ -1,4 +1,4 @@
-using ITensorNetworks: approximate_contract, contraction_sequence, vertex_tag
+using ITensorNetworks: vertex_tag
 
 function build_tntree(tn, N; env_size)
   @assert length(N) == length(env_size)

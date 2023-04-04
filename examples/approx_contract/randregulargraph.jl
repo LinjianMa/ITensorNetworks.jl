@@ -23,14 +23,14 @@ end
 function build_tntree_balanced(
   tn::ITensorNetwork; nvertices_per_partition=2, backend="KaHyPar"
 )
-  @assert is_connected(tn)
+  # @assert is_connected(tn)
   g_parts = partition(tn; npartitions=2, backend=backend)
-  if nv(g_parts[1]) >= nvertices_per_partition
+  if nv(g_parts[1]) >= max(nvertices_per_partition, 2)
     tntree_1 = build_tntree_balanced(g_parts[1]; nvertices_per_partition, backend)
   else
     tntree_1 = Vector{ITensor}(g_parts[1])
   end
-  if nv(g_parts[2]) >= nvertices_per_partition
+  if nv(g_parts[2]) >= max(nvertices_per_partition, 2)
     tntree_2 = build_tntree_balanced(g_parts[2]; nvertices_per_partition, backend=backend)
   else
     tntree_2 = Vector{ITensor}(g_parts[2])

@@ -1,3 +1,5 @@
+using ITensorNetworks: contraction_sequence
+
 INDEX = 0
 
 function contract_log_norm(tn, seq)
@@ -21,7 +23,7 @@ function contract_log_norm(tn, seq)
   end
 end
 
-function exact_contract(network; sc_target)
+function exact_contract(network; sc_target=30)
   ITensors.set_warn_order(1000)
   reset_timer!(ITensors.timer)
   tn = Vector{ITensor}(network)
