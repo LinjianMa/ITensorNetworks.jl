@@ -187,6 +187,9 @@ function update_igs_to_adjacency_tree!(
     root_igs_to_adjacent_igs = Dict{Set{IndexGroup},Set{IndexGroup}}()
     for adjacent_igs in list_adjacent_igs
       for root_igs in keys(igs_to_adjacency_tree)
+        # Note: each adjacent_igs must be the subset of at least one root_igs.
+        # igs in adjacent_igs must have been merged in `igs_to_adjacency_tree`
+        # in previous steps.
         if issubset(adjacent_igs, root_igs)
           update!(root_igs, adjacent_igs)
         end
@@ -248,6 +251,7 @@ function generate_adjacency_tree(ctree, ancestors, ctree_to_igs)
     # mapping each index group to adjacent input igs
     ig_to_adjacent_igs = Dict{IndexGroup,Set{IndexGroup}}()
     # mapping each igs to an adjacency tree
+    # TODO: better to rewrite igs_to_adjacency_tree based on a disjoint set
     igs_to_adjacency_tree = Dict{Set{IndexGroup},IndexAdjacencyTree}()
     for ig in ctree_to_igs[ctree]
       ig_to_adjacent_igs[ig] = Set([ig])
@@ -258,11 +262,17 @@ function generate_adjacency_tree(ctree, ancestors, ctree_to_igs)
       new_igs_index = (i == 1) ? 2 : 1
       new_igs = setdiff(ctree_to_igs[a[new_igs_index]], inter_igs)
       # Tensor product is not considered for now
-      @assert length(inter_igs) >= 1
+      # @assert length(inter_igs) >= 1
       list_adjacent_igs = [ig_to_adjacent_igs[ig] for ig in inter_igs]
-      update_igs_to_adjacency_tree!(list_adjacent_igs, igs_to_adjacency_tree)
-      for ig in new_igs
-        ig_to_adjacent_igs[ig] = union(list_adjacent_igs...)
+      if inter_igs == []
+        for ig in new_igs
+          ig_to_adjacent_igs[ig] = Set{IndexGroup}()
+        end
+      else
+        update_igs_to_adjacency_tree!(list_adjacent_igs, igs_to_adjacency_tree)
+        for ig in new_igs
+          ig_to_adjacent_igs[ig] = union(list_adjacent_igs...)
+        end
       end
       if length(igs_to_adjacency_tree) == 1
         return collect(values(igs_to_adjacency_tree))[1]
@@ -314,8 +324,8 @@ end
 """
 Inplace change `adj_tree` so that its children will be an order of its igs.
 """
-function minswap_adjacency_tree!(
-  adj_tree::IndexAdjacencyTree, input_tree::IndexAdjacencyTree
+function mindist_adjacency_tree!(
+  adj_tree::IndexAdjacencyTree, input_tree::IndexAdjacencyTree, tensors::Vector{ITensor}
 )
   for node in topo_sort(adj_tree; type=IndexAdjacencyTree)
     if node.children isa Vector{IndexGroup}
@@ -327,27 +337,42 @@ function minswap_adjacency_tree!(
     # its ordering is fixed so we don't optimize that.
     if node.fixed_order
       perms = [children_tree, reverse(children_tree)]
-      nswaps = []
+      nswaps_mincuts_dist = []
       for perm in perms
-        push!(nswaps, num_adj_swaps(vcat(perm...), input_order))
+        nswap = num_adj_swaps(vcat(perm...), input_order)
+        mincuts_dist = _comb_mincuts_dist(
+          ITensorNetwork(tensors), [igs[1].data for igs in perm]
+        )
+        push!(nswaps_mincuts_dist, (nswap, mincuts_dist...))
       end
-      children_tree = perms[argmin(nswaps)]
+      children_tree = perms[argmin(nswaps_mincuts_dist)]
     else
-      children_tree = _best_perm_greedy(children_tree, input_order)
+      children_tree = _best_perm_greedy(children_tree, input_order, tensors)
     end
     node.children = vcat(children_tree...)
     node.fixed_order = true
   end
-  return num_adj_swaps(adj_tree.children, input_tree.children)
+  nswap = num_adj_swaps(adj_tree.children, input_tree.children)
+  mincuts_dist = _comb_mincuts_dist(
+    ITensorNetwork(tensors), [igs.data for igs in adj_tree.children]
+  )
+  return (nswap, mincuts_dist...)
 end
 
-function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector)
+function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector, tensors::Vector{ITensor})
   ordered_vs = [vs[1]]
   for v in vs[2:end]
     perms = [insert!(copy(ordered_vs), i, v) for i in 1:(length(ordered_vs) + 1)]
     suborder = [n for n in order if n in vcat(perms[1]...)]
-    nswaps = [num_adj_swaps(vcat(p...), suborder) for p in perms]
-    ordered_vs = perms[argmin(nswaps)]
+    nswaps_mincuts_dist = []
+    for perm in perms
+      nswap = num_adj_swaps(vcat(perm...), suborder)
+      mincuts_dist = _comb_mincuts_dist(
+        ITensorNetwork(tensors), [igs[1].data for igs in perm]
+      )
+      push!(nswaps_mincuts_dist, (nswap, mincuts_dist...))
+    end
+    ordered_vs = perms[argmin(nswaps_mincuts_dist)]
   end
   return ordered_vs
 end
@@ -368,15 +393,23 @@ function _merge(l1_left, l1_right, l2_left, l2_right)
   return _merge(left_lists, right_lists)
 end
 
-function _low_swap_merge(l1_left, l1_right, l2_left, l2_right)
-  if length(l1_left) < length(l2_left)
+function _low_swap_merge(l1_left, l1_right, l2_left, l2_right, l1_in_leaves, l2_in_leaves)
+  if l1_in_leaves
+    left_lists = [[l2_left..., l1_left...]]
+  elseif l2_in_leaves
+    left_lists = [[l1_left..., l2_left...]]
+  elseif length(l1_left) < length(l2_left)
     left_lists = [[l2_left..., l1_left...]]
   elseif length(l1_left) > length(l2_left)
     left_lists = [[l1_left..., l2_left...]]
   else
     left_lists = [[l2_left..., l1_left...], [l1_left..., l2_left...]]
   end
-  if length(l1_right) < length(l2_right)
+  if l1_in_leaves
+    right_lists = [[l1_right..., l2_right...]]
+  elseif l2_in_leaves
+    right_lists = [[l2_right..., l1_right...]]
+  elseif length(l1_right) < length(l2_right)
     right_lists = [[l1_right..., l2_right...]]
   elseif length(l1_right) > length(l2_right)
     right_lists = [[l2_right..., l1_right...]]
@@ -396,6 +429,9 @@ function minswap_adjacency_tree(
   adj_tree::IndexAdjacencyTree,
   input_tree1::IndexAdjacencyTree,
   input_tree2::IndexAdjacencyTree,
+  input1_in_leaves::Bool,
+  input2_in_leaves::Bool,
+  tensors::Vector{ITensor},
 )
   @timeit_debug ITensors.timer "minswap_adjacency_tree" begin
     leaves_1 = get_adj_tree_leaves(input_tree1)
@@ -410,30 +446,71 @@ function minswap_adjacency_tree(
       length(leaves_2_left),
       length(leaves_2_right),
     ])
-    num_swaps_1 =
-      min(length(leaves_1_left), length(leaves_2_left)) +
-      min(length(leaves_1_right), length(leaves_2_right))
-    num_swaps_2 =
-      min(length(leaves_1_left), length(leaves_2_right)) +
-      min(length(leaves_1_right), length(leaves_2_left))
-    if num_swaps_1 == num_swaps_2
-      inputs_1 = _low_swap_merge(
-        leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right
-      )
-      inputs_2 = _low_swap_merge(
-        leaves_1_left, leaves_1_right, reverse(leaves_2_right), reverse(leaves_2_left)
-      )
-      inputs = [inputs_1..., inputs_2...]
-    elseif num_swaps_1 > num_swaps_2
-      inputs = _low_swap_merge(
-        leaves_1_left, leaves_1_right, reverse(leaves_2_right), reverse(leaves_2_left)
-      )
+    if input1_in_leaves && !input2_in_leaves
+      inputs = collect(permutations([leaves_1_left..., leaves_1_right...]))
+      inputs = [
+        IndexAdjacencyTree([leaves_2_left..., i..., leaves_2_right...], true) for
+        i in inputs
+      ]
+      @info "inputs, input1_in_leaves", inputs
+    elseif !input1_in_leaves && input2_in_leaves
+      inputs = collect(permutations([leaves_2_left..., leaves_2_right...]))
+      inputs = [
+        IndexAdjacencyTree([leaves_1_left..., i..., leaves_1_right...], true) for
+        i in inputs
+      ]
+      @info "inputs, input2_in_leaves", inputs
     else
-      inputs = _low_swap_merge(leaves_1_left, leaves_1_right, leaves_2_left, leaves_2_right)
+      num_swaps_1 =
+        min(length(leaves_1_left), length(leaves_2_left)) +
+        min(length(leaves_1_right), length(leaves_2_right))
+      num_swaps_2 =
+        min(length(leaves_1_left), length(leaves_2_right)) +
+        min(length(leaves_1_right), length(leaves_2_left))
+      if num_swaps_1 == num_swaps_2
+        inputs_1 = _low_swap_merge(
+          leaves_1_left,
+          leaves_1_right,
+          leaves_2_left,
+          leaves_2_right,
+          input1_in_leaves,
+          input2_in_leaves,
+        )
+        inputs_2 = _low_swap_merge(
+          leaves_1_left,
+          leaves_1_right,
+          reverse(leaves_2_right),
+          reverse(leaves_2_left),
+          input1_in_leaves,
+          input2_in_leaves,
+        )
+        inputs = [inputs_1..., inputs_2...]
+      elseif num_swaps_1 > num_swaps_2
+        inputs = _low_swap_merge(
+          leaves_1_left,
+          leaves_1_right,
+          reverse(leaves_2_right),
+          reverse(leaves_2_left),
+          input1_in_leaves,
+          input2_in_leaves,
+        )
+      else
+        inputs = _low_swap_merge(
+          leaves_1_left,
+          leaves_1_right,
+          leaves_2_left,
+          leaves_2_right,
+          input1_in_leaves,
+          input2_in_leaves,
+        )
+      end
     end
     adj_tree_copies = [copy(adj_tree) for _ in 1:length(inputs)]
-    nswaps = [minswap_adjacency_tree!(t, i) for (t, i) in zip(adj_tree_copies, inputs)]
-    return inputs[argmin(nswaps)], adj_tree_copies[argmin(nswaps)]
+    nswaps_mincuts_dist_list = [
+      mindist_adjacency_tree!(t, i, tensors) for (t, i) in zip(adj_tree_copies, inputs)
+    ]
+    return inputs[argmin(nswaps_mincuts_dist_list)],
+    adj_tree_copies[argmin(nswaps_mincuts_dist_list)]
   end
 end
 

@@ -144,7 +144,10 @@ end
 function ordered_igs_to_binary_tree(ordered_igs, contract_igs, ig_to_linear_order; ansatz)
   @assert ansatz in ["comb", "mps"]
   @timeit_debug ITensors.timer "ordered_igs_to_binary_tree" begin
-    @assert contract_igs != []
+    if contract_igs == []
+      @info "contract_igs is empty vector"
+    end
+    # @assert contract_igs != []
     left_igs, right_igs = split_igs(ordered_igs, contract_igs)
     if ansatz == "comb"
       return ordered_igs_to_binary_tree_comb(
@@ -327,9 +330,17 @@ function approximate_contract(
       if ctree_to_igs[c] == []
         continue
       end
+      @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
       ctree_to_noswap_tree[c], ctree_to_adj_tree[c] = minswap_adjacency_tree(
-        ctree_to_adj_tree[c], ctree_to_adj_tree[c[1]], ctree_to_adj_tree[c[2]]
+        ctree_to_adj_tree[c],
+        ctree_to_adj_tree[c[1]],
+        ctree_to_adj_tree[c[2]],
+        c[1] in tn_leaves,
+        c[2] in tn_leaves,
+        vectorize(c),
       )
+      @info "ctree_to_noswap_tree[c]", ctree_to_noswap_tree[c]
+      @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
     end
     # mapping each contraction tree to its contract igs
     ctree_to_contract_igs = Dict{Vector,Vector{IndexGroup}}()
@@ -374,7 +385,10 @@ function approximate_contract(
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
         tn = vcat(tn1, tn2)
-        return [_optcontract(tn)], log_accumulated_norm
+        out = _optcontract(tn)
+        out_nrm = norm(out)
+        out /= out_nrm
+        return [out], log_accumulated_norm + log(out_nrm)
       end
       # caching is not used here
       if use_cache == false
