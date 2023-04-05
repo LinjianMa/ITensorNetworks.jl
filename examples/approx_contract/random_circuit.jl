@@ -163,8 +163,8 @@ function boundary_to_center_tntree(
   return [tntree1, tntree2]
 end
 
-N = (5, 5)
-depth = 8
+N = (8, 8)
+depth = 6
 # init_state, circuit_tensors, circuit_tensors_dag, final_state = random_circuit_tn(N, depth)
 # tntree = boundary_to_center_tntree(init_state, circuit_tensors, circuit_tensors_dag, final_state; nvertices_per_partition=4)
 tntree = random_circuit_tn_line_partition_tree(N, depth)

@@ -7,7 +7,7 @@ function _binary_partition(tn::ITensorNetwork, source_inds::Vector{<:Index})
   external_inds = noncommoninds(Vector{ITensor}(tn)...)
   # add delta tensor to each external ind
   external_sim_ind = [sim(ind) for ind in external_inds]
-  tn = map_data(t -> replaceinds(t, external_inds => external_sim_ind), tn; edges=[])
+  tn = map_data(t -> replaceinds(t, Dict(external_inds .=> external_sim_ind)), tn; edges=[])
   tn_wo_deltas = rename_vertices(v -> v[1], subgraph(v -> v[2] == 1, tn))
   deltas = Vector{ITensor}(subgraph(v -> v[2] == 2, tn))
   scalars = rename_vertices(v -> v[1], subgraph(v -> v[2] == 3, tn))

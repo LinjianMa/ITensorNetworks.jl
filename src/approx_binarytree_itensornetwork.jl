@@ -192,7 +192,7 @@ function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
     D, U, Ut = F.D, F.V, F.Vt
   end
   t11 = time() - t00
-  # @info "size of U", size(U), "size of diag", size(diag), "costs", t11
+  @info "size of U", size(U), "size of diag", size(D), "costs", t11
   return Ut
 end
 
