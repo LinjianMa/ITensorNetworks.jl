@@ -77,6 +77,7 @@ function boundary_state(ancestor::IndexAdjacencyTree, adj_igs::Set{IndexGroup})
   end
   if !ancestor.fixed_order
     filter_children = filter(a -> contains(a, adj_igs), ancestor.children)
+    # length(filter_children) < 1 means adj_igs is distributed in multiple children
     @assert length(filter_children) <= 1
     if length(filter_children) == 1
       return "middle"
