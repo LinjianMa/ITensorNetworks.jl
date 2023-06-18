@@ -166,30 +166,19 @@ function reorder!(adj_tree::IndexAdjacencyTree, adj_igs::Set{IndexGroup}; bounda
   return true
 end
 
-# Update both keys and values in igs_to_adjacency_tree based on list_adjacent_igs
+# Update both keys and values in igs_to_adjacency_tree based on adjacent_igs
 # NOTE: keys of `igs_to_adjacency_tree` are target igs, not those adjacent to ancestors
 function update_igs_to_adjacency_tree!(
-  list_adjacent_igs::Vector, igs_to_adjacency_tree::Dict{Set{IndexGroup},IndexAdjacencyTree}
+  adjacent_igs::Set{IndexGroup},
+  igs_to_adjacency_tree::Dict{Set{IndexGroup},IndexAdjacencyTree},
 )
-  function update!(root_igs, adjacent_igs)
-    if !haskey(root_igs_to_adjacent_igs, root_igs)
-      root_igs_to_adjacent_igs[root_igs] = adjacent_igs
-    else
-      val = root_igs_to_adjacent_igs[root_igs]
-      root_igs_to_adjacent_igs[root_igs] = union(val, adjacent_igs)
-    end
-  end
   @timeit_debug ITensors.timer "update_igs_to_adjacency_tree" begin
     # get each root igs, get the adjacent igs needed. TODO: do we need to consider boundaries here?
     root_igs_to_adjacent_igs = Dict{Set{IndexGroup},Set{IndexGroup}}()
-    for adjacent_igs in list_adjacent_igs
-      for root_igs in keys(igs_to_adjacency_tree)
-        # Note: each adjacent_igs must be the subset of at least one root_igs.
-        # igs in adjacent_igs must have been merged in `igs_to_adjacency_tree`
-        # in previous steps.
-        if issubset(adjacent_igs, root_igs)
-          update!(root_igs, adjacent_igs)
-        end
+    for root_igs in keys(igs_to_adjacency_tree)
+      common_igs = intersect(adjacent_igs, root_igs)
+      if common_igs != Set()
+        root_igs_to_adjacent_igs[root_igs] = common_igs
       end
     end
     if length(root_igs_to_adjacent_igs) == 1
@@ -258,18 +247,13 @@ function generate_adjacency_tree(ctree, path, ctree_to_igs)
       inter_igs = intersect(ctree_to_igs[a[1]], ctree_to_igs[a[2]])
       new_igs_index = (i == 1) ? 2 : 1
       new_igs = setdiff(ctree_to_igs[a[new_igs_index]], inter_igs)
-      # Tensor product is not considered for now
-      # @assert length(inter_igs) >= 1
-      list_adjacent_igs = [ig_to_input_adj_igs[ig] for ig in inter_igs]
-      if inter_igs == []
-        for ig in new_igs
-          ig_to_input_adj_igs[ig] = Set{IndexGroup}()
-        end
-      else
-        update_igs_to_adjacency_tree!(list_adjacent_igs, igs_to_adjacency_tree)
-        for ig in new_igs
-          ig_to_input_adj_igs[ig] = union(list_adjacent_igs...)
-        end
+      adjacent_igs = union([ig_to_input_adj_igs[ig] for ig in inter_igs]...)
+      # `inter_igs != []` means it's a tensor product
+      if inter_igs != []
+        update_igs_to_adjacency_tree!(adjacent_igs, igs_to_adjacency_tree)
+      end
+      for ig in new_igs
+        ig_to_input_adj_igs[ig] = adjacent_igs
       end
       if length(igs_to_adjacency_tree) == 1
         return collect(values(igs_to_adjacency_tree))[1]
