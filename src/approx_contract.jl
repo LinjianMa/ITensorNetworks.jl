@@ -109,6 +109,7 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
     ctree_to_igs = Dict{Vector,Vector{IndexGroup}}()
     index_groups = get_index_groups(ctrees[end])
     for c in vcat(tn_leaves, ctrees)
+      # TODO: the order here is not optimized
       ctree_to_igs[c] = neighbor_index_groups(c, index_groups)
     end
     ctree_to_ancestors = get_ancestors(ctrees[end])
@@ -330,7 +331,6 @@ function approximate_contract(
       if ctree_to_igs[c] == []
         continue
       end
-      @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
       ctree_to_noswap_tree[c], ctree_to_adj_tree[c] = minswap_adjacency_tree(
         ctree_to_adj_tree[c],
         ctree_to_adj_tree[c[1]],
@@ -339,9 +339,10 @@ function approximate_contract(
         c[2] in tn_leaves,
         vectorize(c),
       )
-      @info "ctree_to_noswap_tree[c]", ctree_to_noswap_tree[c]
-      @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
+      @info "reference ordering", ctree_to_noswap_tree[c]
+      @info "edge set ordering", ctree_to_adj_tree[c]
     end
+    return [ITensor(1.0)], 1.0
     # mapping each contraction tree to its contract igs
     ctree_to_contract_igs = Dict{Vector,Vector{IndexGroup}}()
     for c in ctrees

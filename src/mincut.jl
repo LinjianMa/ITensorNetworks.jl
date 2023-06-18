@@ -243,15 +243,17 @@ function _mincut_inds(
 end
 
 function _comb_mincuts_dist(tn::ITensorNetwork, inds_vector::Vector{<:Vector{<:Index}})
-  outinds = vcat(inds_vector...)
-  # noncommoninds(Vector{ITensor}(tn)...)
-  maxweight_tn, out_to_maxweight_ind = _maxweightoutinds_tn(tn, outinds)
-  sourceinds_list = [vcat(inds_vector[1:i]...) for i in 1:(length(inds_vector) - 1)]
-  weights = _partition_mincuts_dist(
-    tn => maxweight_tn, out_to_maxweight_ind, sourceinds_list
-  )
-  mincut_val = sum([w[1] for w in weights])
-  maxweight_mincut_val = sum([w[2] for w in weights])
-  dist = sum([w[3] for w in weights])
-  return (mincut_val, maxweight_mincut_val, dist)
+  @timeit_debug ITensors.timer "_comb_mincuts_dist" begin
+    outinds = vcat(inds_vector...)
+    # noncommoninds(Vector{ITensor}(tn)...)
+    maxweight_tn, out_to_maxweight_ind = _maxweightoutinds_tn(tn, outinds)
+    sourceinds_list = [vcat(inds_vector[1:i]...) for i in 1:(length(inds_vector) - 1)]
+    weights = _partition_mincuts_dist(
+      tn => maxweight_tn, out_to_maxweight_ind, sourceinds_list
+    )
+    mincut_val = sum([w[1] for w in weights])
+    maxweight_mincut_val = sum([w[2] for w in weights])
+    dist = sum([w[3] for w in weights])
+    return (mincut_val, maxweight_mincut_val, dist)
+  end
 end

@@ -88,15 +88,22 @@ function boundary_state(ancestor::IndexAdjacencyTree, adj_igs::Set{IndexGroup})
     end
   end
   @assert length(ancestor.children) >= 2
-  if contains(ancestor.children[1], adj_igs)
-    return "left"
-  elseif contains(ancestor.children[end], adj_igs)
-    return "right"
-  elseif Set(get_adj_tree_leaves(ancestor)) == adj_igs
+  if Set(get_adj_tree_leaves(ancestor)) == adj_igs
     return "all"
-  else
-    return "invalid"
   end
+  for i in 1:(length(ancestor.children) - 1)
+    leaves = vcat([get_adj_tree_leaves(c) for c in ancestor.children[1:i]]...)
+    if Set(leaves) == adj_igs
+      return "left"
+    end
+  end
+  for i in 2:length(ancestor.children)
+    leaves = vcat([get_adj_tree_leaves(c) for c in ancestor.children[i:end]]...)
+    if Set(leaves) == adj_igs
+      return "right"
+    end
+  end
+  return "invalid"
 end
 
 function reorder_to_right!(
@@ -128,42 +135,31 @@ function reorder!(adj_tree::IndexAdjacencyTree, adj_igs::Set{IndexGroup}; bounda
     return false
   end
   adj_trees = topo_sort(adj_tree; type=IndexAdjacencyTree)
-  ancestors = [tree for tree in adj_trees if contains(tree, adj_igs)]
+  path = [tree for tree in adj_trees if contains(tree, adj_igs)]
   ancestor_to_state = Dict{IndexAdjacencyTree,String}()
   # get the boundary state
-  for ancestor in ancestors
+  for ancestor in path
     state = boundary_state(ancestor, adj_igs)
     if state == "invalid"
       return false
     end
     ancestor_to_state[ancestor] = state
   end
-  # update ancestors
-  for ancestor in ancestors
+  # update path
+  for ancestor in path
     # reorder
     if ancestor_to_state[ancestor] == "left"
+      @assert ancestor.fixed_order == true
       ancestor.children = reverse(ancestor.children)
     elseif ancestor_to_state[ancestor] == "middle"
       @assert ancestor.fixed_order == false
       filter_children = filter(a -> contains(a, adj_igs), ancestor.children)
       reorder_to_right!(ancestor, filter_children)
     end
-    # merge
-    if ancestor.fixed_order && ancestor.children isa Vector{IndexAdjacencyTree}
-      new_children = Vector{IndexAdjacencyTree}()
-      for child in ancestor.children
-        if !child.fixed_order
-          push!(new_children, child)
-        else
-          push!(new_children, child.children...)
-        end
-      end
-      ancestor.children = new_children
-    end
   end
   # check boundary
   if boundary == "left"
-    for ancestor in ancestors
+    for ancestor in path
       ancestor.children = reverse(ancestor.children)
     end
   end
@@ -317,9 +313,22 @@ end
 num_adj_swaps(v::Vector) = length(bubble_sort(v))
 
 function minswap_adjacency_tree!(adj_tree::IndexAdjacencyTree)
+  # TODO: this seems not correct, need to 1) generate the reference ordering, and 2) minimize the Kendall-Tau distance
   leaves = Vector{IndexGroup}(get_adj_tree_leaves(adj_tree))
   adj_tree.children = leaves
   return adj_tree.fixed_order = true
+end
+
+function _mincut_permutation(perms::Vector{<:Vector}, tensors::Vector{ITensor})
+  if length(perms) == 1
+    return perms[1]
+  end
+  mincuts_dist = []
+  for perm in perms
+    _dist = _comb_mincuts_dist(ITensorNetwork(tensors), [igs[1].data for igs in perm])
+    push!(mincuts_dist, _dist)
+  end
+  return perms[argmin(mincuts_dist)]
 end
 
 """
@@ -338,15 +347,9 @@ function mindist_adjacency_tree!(
     # its ordering is fixed so we don't optimize that.
     if node.fixed_order
       perms = [children_tree, reverse(children_tree)]
-      nswaps_mincuts_dist = []
-      for perm in perms
-        nswap = num_adj_swaps(vcat(perm...), input_order)
-        mincuts_dist = _comb_mincuts_dist(
-          ITensorNetwork(tensors), [igs[1].data for igs in perm]
-        )
-        push!(nswaps_mincuts_dist, (nswap, mincuts_dist...))
-      end
-      children_tree = perms[argmin(nswaps_mincuts_dist)]
+      nswaps = [num_adj_swaps(vcat(p...), input_order) for p in perms]
+      perms = [perms[i] for i in 1:length(perms) if nswaps[i] == min(nswaps...)]
+      children_tree = _mincut_permutation(perms, tensors)
     else
       children_tree = _best_perm_greedy(children_tree, input_order, tensors)
     end
@@ -354,10 +357,7 @@ function mindist_adjacency_tree!(
     node.fixed_order = true
   end
   nswap = num_adj_swaps(adj_tree.children, input_tree.children)
-  mincuts_dist = _comb_mincuts_dist(
-    ITensorNetwork(tensors), [igs.data for igs in adj_tree.children]
-  )
-  return (nswap, mincuts_dist...)
+  return nswap
 end
 
 function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector, tensors::Vector{ITensor})
@@ -365,15 +365,9 @@ function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector, tensors::Vector{
   for v in vs[2:end]
     perms = [insert!(copy(ordered_vs), i, v) for i in 1:(length(ordered_vs) + 1)]
     suborder = [n for n in order if n in vcat(perms[1]...)]
-    nswaps_mincuts_dist = []
-    for perm in perms
-      nswap = num_adj_swaps(vcat(perm...), suborder)
-      mincuts_dist = _comb_mincuts_dist(
-        ITensorNetwork(tensors), [igs[1].data for igs in perm]
-      )
-      push!(nswaps_mincuts_dist, (nswap, mincuts_dist...))
-    end
-    ordered_vs = perms[argmin(nswaps_mincuts_dist)]
+    nswaps = [num_adj_swaps(vcat(p...), suborder) for p in perms]
+    perms = [perms[i] for i in 1:length(perms) if nswaps[i] == min(nswaps...)]
+    ordered_vs = _mincut_permutation(perms, tensors)
   end
   return ordered_vs
 end
@@ -447,20 +441,19 @@ function minswap_adjacency_tree(
       length(leaves_2_left),
       length(leaves_2_right),
     ])
+    # TODO: the inputs are not optimal. Consider using recursive bisection.
     if input1_in_leaves && !input2_in_leaves
       inputs = collect(permutations([leaves_1_left..., leaves_1_right...]))
       inputs = [
         IndexAdjacencyTree([leaves_2_left..., i..., leaves_2_right...], true) for
         i in inputs
       ]
-      @info "inputs, input1_in_leaves", inputs
     elseif !input1_in_leaves && input2_in_leaves
       inputs = collect(permutations([leaves_2_left..., leaves_2_right...]))
       inputs = [
         IndexAdjacencyTree([leaves_1_left..., i..., leaves_1_right...], true) for
         i in inputs
       ]
-      @info "inputs, input2_in_leaves", inputs
     else
       num_swaps_1 =
         min(length(leaves_1_left), length(leaves_2_left)) +
@@ -507,11 +500,24 @@ function minswap_adjacency_tree(
       end
     end
     adj_tree_copies = [copy(adj_tree) for _ in 1:length(inputs)]
-    nswaps_mincuts_dist_list = [
+    nswaps_dist_list = [
       mindist_adjacency_tree!(t, i, tensors) for (t, i) in zip(adj_tree_copies, inputs)
     ]
-    return inputs[argmin(nswaps_mincuts_dist_list)],
-    adj_tree_copies[argmin(nswaps_mincuts_dist_list)]
+    inputs = [
+      inputs[i] for i in 1:length(inputs) if nswaps_dist_list[i] == min(nswaps_dist_list...)
+    ]
+    adj_tree_copies = [
+      adj_tree_copies[i] for
+      i in 1:length(adj_tree_copies) if nswaps_dist_list[i] == min(nswaps_dist_list...)
+    ]
+    if length(inputs) == 1
+      return inputs[1], adj_tree_copies[1]
+    end
+    mincuts = [
+      _comb_mincuts_dist(ITensorNetwork(tensors), [igs.data for igs in adj_tree.children])
+      for adj_tree in adj_tree_copies
+    ]
+    return inputs[argmin(mincuts)], adj_tree_copies[argmin(mincuts)]
   end
 end
 
