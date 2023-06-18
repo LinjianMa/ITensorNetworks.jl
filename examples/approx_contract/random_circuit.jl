@@ -43,7 +43,7 @@ end
 function line_partition_gates(N, gates; order=1)
   @assert order in [1, 2, 3, 0]
   nrow, ncol = N
-  if order in [1, 0]
+  if order in [0, 1]
     partition_qubits = [[(c - 1) * nrow + r for r in 1:nrow] for c in 1:ncol]
   elseif order == 2
     # TODO: add c = 1

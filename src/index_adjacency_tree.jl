@@ -241,34 +241,34 @@ end
 # Args:
 # ==========
 # ctree: the input contraction tree
-# ancestors: ancestor ctrees of the input ctree
+# path: the path containing ancestor ctrees of the input ctree
 # ctree_to_igs: mapping each ctree to neighboring index groups 
-function generate_adjacency_tree(ctree, ancestors, ctree_to_igs)
+function generate_adjacency_tree(ctree, path, ctree_to_igs)
   @timeit_debug ITensors.timer "generate_adjacency_tree" begin
     # mapping each index group to adjacent input igs
-    ig_to_adjacent_igs = Dict{IndexGroup,Set{IndexGroup}}()
+    ig_to_input_adj_igs = Dict{IndexGroup,Set{IndexGroup}}()
     # mapping each igs to an adjacency tree
     # TODO: better to rewrite igs_to_adjacency_tree based on a disjoint set
     igs_to_adjacency_tree = Dict{Set{IndexGroup},IndexAdjacencyTree}()
     for ig in ctree_to_igs[ctree]
-      ig_to_adjacent_igs[ig] = Set([ig])
+      ig_to_input_adj_igs[ig] = Set([ig])
       igs_to_adjacency_tree[Set([ig])] = IndexAdjacencyTree(ig)
     end
-    for (i, a) in ancestors
+    for (i, a) in path
       inter_igs = intersect(ctree_to_igs[a[1]], ctree_to_igs[a[2]])
       new_igs_index = (i == 1) ? 2 : 1
       new_igs = setdiff(ctree_to_igs[a[new_igs_index]], inter_igs)
       # Tensor product is not considered for now
       # @assert length(inter_igs) >= 1
-      list_adjacent_igs = [ig_to_adjacent_igs[ig] for ig in inter_igs]
+      list_adjacent_igs = [ig_to_input_adj_igs[ig] for ig in inter_igs]
       if inter_igs == []
         for ig in new_igs
-          ig_to_adjacent_igs[ig] = Set{IndexGroup}()
+          ig_to_input_adj_igs[ig] = Set{IndexGroup}()
         end
       else
         update_igs_to_adjacency_tree!(list_adjacent_igs, igs_to_adjacency_tree)
         for ig in new_igs
-          ig_to_adjacent_igs[ig] = union(list_adjacent_igs...)
+          ig_to_input_adj_igs[ig] = union(list_adjacent_igs...)
         end
       end
       if length(igs_to_adjacency_tree) == 1
