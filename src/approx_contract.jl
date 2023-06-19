@@ -84,8 +84,8 @@ function uncontractinds(tn)
   end
 end
 
-function get_paths(ctree)
-  @timeit_debug ITensors.timer "get_paths" begin
+function _get_paths(ctree)
+  @timeit_debug ITensors.timer "_get_paths" begin
     ctree_to_path = Dict{Vector,Vector}()
     queue = [ctree]
     ctree_to_path[ctree] = []
@@ -112,22 +112,23 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
       # TODO: the order here is not optimized
       ctree_to_igs[c] = neighbor_index_groups(c, index_groups)
     end
-    ctree_to_path = get_paths(ctrees[end])
+    ctree_to_path = _get_paths(ctrees[end])
     # mapping each contraction tree to its index adjacency tree
-    ctree_to_adj_tree = Dict{Vector,IndexAdjacencyTree}()
-    # ctree_to_adj_tree = Dict{Vector,DataGraph{Tuple{Int64,String},IndexGroup}}()
+    ctree_to_adj_tree = Dict{Vector,NamedDiGraph{Tuple{Tuple,String}}}()
     for leaf in tn_leaves
-      ctree_to_adj_tree[leaf] = generate_adjacency_tree(
+      ctree_to_adj_tree[leaf] = _generate_adjacency_tree(
         leaf, ctree_to_path[leaf], ctree_to_igs
       )
-      minswap_adjacency_tree!(ctree_to_adj_tree[leaf])
+      # minswap_adjacency_tree!(ctree_to_adj_tree[leaf])
     end
     for c in ctrees
-      adj_tree = generate_adjacency_tree(c, ctree_to_path[c], ctree_to_igs)
+      adj_tree = _generate_adjacency_tree(c, ctree_to_path[c], ctree_to_igs)
       if adj_tree != nothing
         ctree_to_adj_tree[c] = adj_tree
+        @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
       end
     end
+    @assert false
     # mapping each index group to a linear ordering
     ig_to_linear_order = Dict{IndexGroup,Vector}()
     for leaf in tn_leaves
@@ -322,6 +323,7 @@ function approximate_contract(
     tn_leaves = get_leaves(ctree)
     environments = tn_leaves
     ctrees = topo_sort(ctree; leaves=tn_leaves)
+    @info "start _approximate_contract_pre_process"
     ctree_to_igs, ctree_to_adj_tree, ig_to_linear_order = _approximate_contract_pre_process(
       tn_leaves, ctrees
     )

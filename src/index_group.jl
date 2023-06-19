@@ -3,6 +3,10 @@ mutable struct IndexGroup
   istree::Bool
 end
 
+function Base.show(io::IO, ig::IndexGroup)
+  return print(io, ig.data[1].tags)
+end
+
 # TODO: general tags are not comparable
 Base.isless(a::Index, b::Index) = id(a) < id(b) || (id(a) == id(b) && plev(a) < plev(b)) # && tags(a) < tags(b)
 

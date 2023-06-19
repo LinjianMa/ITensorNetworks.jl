@@ -71,34 +71,30 @@ function Base.iterate(x::IndexAdjacencyTree, index)
   return x.children[index], index + 1
 end
 
-function boundary_state(ancestor::IndexAdjacencyTree, adj_igs::Set{IndexGroup})
-  if ancestor.children isa Vector{IndexGroup}
+function boundary_state(v::Tuple{Tuple,String}, adj_igs::Set)
+  if Set(Leaves(v[1])) == adj_igs
     return "all"
   end
-  if !ancestor.fixed_order
-    filter_children = filter(a -> contains(a, adj_igs), ancestor.children)
+  if v[2] == "unordered"
+    filter_children = filter(c -> issubset(adj_igs, Set(Leaves(c))), v[1])
     # length(filter_children) < 1 means adj_igs is distributed in multiple children
     @assert length(filter_children) <= 1
     if length(filter_children) == 1
       return "middle"
-    elseif Set(get_adj_tree_leaves(ancestor)) == adj_igs
-      return "all"
-    else
-      return "invalid"
     end
+    # TODO: if more than 1 children contain adj_igs, currently we don't reorder the
+    # leaves. This may need to be optimized later.
+    return "invalid"
   end
-  @assert length(ancestor.children) >= 2
-  if Set(get_adj_tree_leaves(ancestor)) == adj_igs
-    return "all"
-  end
-  for i in 1:(length(ancestor.children) - 1)
-    leaves = vcat([get_adj_tree_leaves(c) for c in ancestor.children[1:i]]...)
+  @assert length(v[1]) >= 2
+  for i in 1:(length(v[1]) - 1)
+    leaves = vcat([Set(Leaves(c)) for c in v[1][1:i]]...)
     if Set(leaves) == adj_igs
       return "left"
     end
   end
-  for i in 2:length(ancestor.children)
-    leaves = vcat([get_adj_tree_leaves(c) for c in ancestor.children[i:end]]...)
+  for i in 2:length(v[1])
+    leaves = vcat([Set(Leaves(c)) for c in v[1][i:end]]...)
     if Set(leaves) == adj_igs
       return "right"
     end
@@ -106,122 +102,171 @@ function boundary_state(ancestor::IndexAdjacencyTree, adj_igs::Set{IndexGroup})
   return "invalid"
 end
 
-function reorder_to_right!(
-  ancestor::IndexAdjacencyTree, filter_children::Vector{IndexAdjacencyTree}
+function reorder_to_boundary!(
+  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
+  v::Tuple{Tuple,String},
+  target_child::Tuple{Tuple,String};
+  direction="right",
 )
-  remain_children = setdiff(ancestor.children, filter_children)
-  @assert length(filter_children) >= 1
+  new_v = v
+  children = child_vertices(adj_tree, v)
+  remain_children = setdiff(children, [target_child])
   @assert length(remain_children) >= 1
   if length(remain_children) == 1
-    new_child1 = remain_children[1]
+    remain_child = remain_children[1]
+    if direction == "right"
+      new_v = ((remain_child[1], target_child[1]), "ordered")
+    else
+      new_v = ((target_child[1], remain_child[1]), "ordered")
+    end
+    if new_v != v
+      _add_vertex_edges!(
+        adj_tree, new_v; children=children, parent=parent_vertex(adj_tree, v)
+      )
+      rem_vertex!(adj_tree, v)
+    end
   else
-    new_child1 = IndexAdjacencyTree(remain_children, false)
+    new_child = (Tuple([v[1] for v in remain_children]), "unordered")
+    _add_vertex_edges!(adj_tree, new_child; children=remain_children, parent=v)
+    if direction == "right"
+      new_v = ((new_child[1], target_child[1]), "ordered")
+    else
+      new_v = ((target_child[1], new_child[1]), "ordered")
+    end
+    _add_vertex_edges!(
+      adj_tree, new_v; children=[new_child, target_child], parent=parent_vertex(adj_tree, v)
+    )
+    rem_vertex!(adj_tree, v)
   end
-  if length(filter_children) == 1
-    new_child2 = filter_children[1]
-  else
-    new_child2 = IndexAdjacencyTree(filter_children, false)
+  return new_v
+end
+
+function _add_vertex_edges!(
+  adj_tree::NamedDiGraph{Tuple{Tuple,String}}, v; children=[], parent=nothing
+)
+  add_vertex!(adj_tree, v)
+  if parent != nothing
+    add_edge!(adj_tree, parent => v)
   end
-  ancestor.children = [new_child1, new_child2]
-  return ancestor.fixed_order = true
+  for c in children
+    add_edge!(adj_tree, v => c)
+  end
 end
 
 """
 reorder adj_tree based on adj_igs
 """
-function reorder!(adj_tree::IndexAdjacencyTree, adj_igs::Set{IndexGroup}; boundary="right")
+function reorder!(
+  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
+  root::Tuple{Tuple,String},
+  adj_igs::Set;
+  boundary="right",
+)
   @assert boundary in ["left", "right"]
-  if boundary_state(adj_tree, adj_igs) == "all"
-    return false
+  if boundary_state(root, adj_igs) == "all"
+    return false, root
   end
-  adj_trees = topo_sort(adj_tree; type=IndexAdjacencyTree)
-  path = [tree for tree in adj_trees if contains(tree, adj_igs)]
-  ancestor_to_state = Dict{IndexAdjacencyTree,String}()
+  sub_tree = subgraph(v -> issubset(Set(Leaves(v[1])), Set(Leaves(root[1]))), adj_tree)
+  traversal = post_order_dfs_vertices(sub_tree, root)
+  path = [v for v in traversal if issubset(adj_igs, Set(Leaves(v[1])))]
+  # TODO: below is hacky
+  new_root = root
   # get the boundary state
-  for ancestor in path
-    state = boundary_state(ancestor, adj_igs)
+  for v in path
+    state = boundary_state(v, adj_igs)
     if state == "invalid"
-      return false
+      return false, root
     end
-    ancestor_to_state[ancestor] = state
-  end
-  # update path
-  for ancestor in path
+    children = child_vertices(adj_tree, v)
     # reorder
-    if ancestor_to_state[ancestor] == "left"
-      @assert ancestor.fixed_order == true
-      ancestor.children = reverse(ancestor.children)
-    elseif ancestor_to_state[ancestor] == "middle"
-      @assert ancestor.fixed_order == false
-      filter_children = filter(a -> contains(a, adj_igs), ancestor.children)
-      reorder_to_right!(ancestor, filter_children)
+    if state in ["left", "right"] && state != boundary
+      @assert v[2] == "ordered"
+      new_v = (reverse(v[1]), v[2])
+      # TODO: below is hacky
+      if v == root
+        new_root = new_v
+      end
+      _add_vertex_edges!(
+        adj_tree, new_v; children=children, parent=parent_vertex(adj_tree, v)
+      )
+      rem_vertex!(adj_tree, v)
+      # v.children = reverse(v.children)
+    elseif state == "middle"
+      @assert v[2] == "unordered"
+      target_child = filter(c -> issubset(adj_igs, Set(Leaves(c[1]))), children)
+      @assert length(target_child) == 1
+      new_v = reorder_to_boundary!(adj_tree, v, target_child[1]; direction=boundary)
+      if v == root
+        new_root = new_v
+      end
     end
   end
-  # check boundary
-  if boundary == "left"
-    for ancestor in path
-      ancestor.children = reverse(ancestor.children)
-    end
-  end
-  return true
+  return true, new_root
 end
 
 # Update both keys and values in igs_to_adjacency_tree based on adjacent_igs
 # NOTE: keys of `igs_to_adjacency_tree` are target igs, not those adjacent to ancestors
-function update_igs_to_adjacency_tree!(
-  adjacent_igs::Set{IndexGroup},
-  igs_to_adjacency_tree::Dict{Set{IndexGroup},IndexAdjacencyTree},
+function update_adjacency_tree!(
+  adjacency_tree::NamedDiGraph{Tuple{Tuple,String}}, adjacent_igs::Set
 )
-  @timeit_debug ITensors.timer "update_igs_to_adjacency_tree" begin
-    # get each root igs, get the adjacent igs needed. TODO: do we need to consider boundaries here?
-    root_igs_to_adjacent_igs = Dict{Set{IndexGroup},Set{IndexGroup}}()
-    for root_igs in keys(igs_to_adjacency_tree)
+  @timeit_debug ITensors.timer "update_adjacency_tree" begin
+    root_v_to_adjacent_igs = Dict{Tuple{Tuple,String},Set}()
+    for r in _roots(adjacency_tree)
+      root_igs = Set(Leaves(r[1]))
       common_igs = intersect(adjacent_igs, root_igs)
       if common_igs != Set()
-        root_igs_to_adjacent_igs[root_igs] = common_igs
+        root_v_to_adjacent_igs[r] = common_igs
       end
     end
-    if length(root_igs_to_adjacent_igs) == 1
+    if length(root_v_to_adjacent_igs) == 1
       return nothing
     end
     # if at least 3: for now just put everything together
-    if length(root_igs_to_adjacent_igs) >= 3
-      root_igs = keys(root_igs_to_adjacent_igs)
-      root = union(root_igs...)
-      igs_to_adjacency_tree[root] = IndexAdjacencyTree(
-        [igs_to_adjacency_tree[r] for r in root_igs], false
-      )
-      for r in root_igs
-        delete!(igs_to_adjacency_tree, r)
-      end
+    if length(root_v_to_adjacent_igs) >= 3
+      __roots = keys(root_v_to_adjacent_igs)
+      new_v = (Tuple([r[1] for r in __roots]), "unordered")
+      _add_vertex_edges!(adjacency_tree, new_v; children=__roots)
       return nothing
     end
     # if 2: assign adjacent_igs to boundary of root_igs (if possible), then concatenate
-    igs1, igs2 = collect(keys(root_igs_to_adjacent_igs))
-    reordered_1 = reorder!(
-      igs_to_adjacency_tree[igs1], root_igs_to_adjacent_igs[igs1]; boundary="right"
+    v1, v2 = collect(keys(root_v_to_adjacent_igs))
+    reordered_1, update_v1 = reorder!(
+      adjacency_tree, v1, root_v_to_adjacent_igs[v1]; boundary="right"
     )
-    reordered_2 = reorder!(
-      igs_to_adjacency_tree[igs2], root_igs_to_adjacent_igs[igs2]; boundary="left"
+    reordered_2, update_v2 = reorder!(
+      adjacency_tree, v2, root_v_to_adjacent_igs[v2]; boundary="left"
     )
-    adj_tree_1 = igs_to_adjacency_tree[igs1]
-    adj_tree_2 = igs_to_adjacency_tree[igs2]
     if (!reordered_1) && (!reordered_2)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2], false)
-    elseif (!reordered_1)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1, adj_tree_2.children...], true)
-    elseif (!reordered_2)
-      out_adj_tree = IndexAdjacencyTree([adj_tree_1.children..., adj_tree_2], true)
-    else
-      out_adj_tree = IndexAdjacencyTree(
-        [adj_tree_1.children..., adj_tree_2.children...], true
+      new_v = ((update_v1[1], update_v2[1]), "unordered")
+      _add_vertex_edges!(adjacency_tree, new_v; children=[update_v1, update_v2])
+    elseif (reordered_2)
+      new_v = ((update_v1[1], update_v2[1]...), "ordered")
+      _add_vertex_edges!(
+        adjacency_tree,
+        new_v;
+        children=[update_v1, child_vertices(adjacency_tree, update_v2)...],
       )
-    end
-    root_igs = keys(root_igs_to_adjacent_igs)
-    root = union(root_igs...)
-    igs_to_adjacency_tree[root] = out_adj_tree
-    for r in root_igs
-      delete!(igs_to_adjacency_tree, r)
+      rem_vertex!(adjacency_tree, update_v2)
+    elseif (reordered_1)
+      new_v = ((update_v1[1]..., update_v2[1]), "ordered")
+      _add_vertex_edges!(
+        adjacency_tree,
+        new_v;
+        children=[update_v2, child_vertices(adjacency_tree, update_v1)...],
+      )
+      rem_vertex!(adjacency_tree, update_v1)
+    else
+      new_v = ((update_v1[1]..., update_v2[1]...), "ordered")
+      _add_vertex_edges!(
+        adjacency_tree,
+        new_v;
+        children=[
+          child_vertices(adjacency_tree, update_v1)...,
+          child_vertices(adjacency_tree, update_v2)...,
+        ],
+      )
+      rem_vertex!(adjacency_tree, update_v1)
+      rem_vertex!(adjacency_tree, update_v2)
     end
   end
 end
@@ -232,36 +277,40 @@ end
 # ctree: the input contraction tree
 # path: the path containing ancestor ctrees of the input ctree
 # ctree_to_igs: mapping each ctree to neighboring index groups 
-function generate_adjacency_tree(ctree, path, ctree_to_igs)
-  @timeit_debug ITensors.timer "generate_adjacency_tree" begin
+function _generate_adjacency_tree(ctree, path, ctree_to_open_edges)
+  @timeit_debug ITensors.timer "_generate_adjacency_tree" begin
     # mapping each index group to adjacent input igs
-    ig_to_input_adj_igs = Dict{IndexGroup,Set{IndexGroup}}()
+    ig_to_input_adj_igs = Dict{Any,Set}()
     # mapping each igs to an adjacency tree
-    # TODO: better to rewrite igs_to_adjacency_tree based on a disjoint set
-    igs_to_adjacency_tree = Dict{Set{IndexGroup},IndexAdjacencyTree}()
-    for ig in ctree_to_igs[ctree]
+    adjacency_tree = NamedDiGraph{Tuple{Tuple,String}}()
+    for ig in ctree_to_open_edges[ctree]
       ig_to_input_adj_igs[ig] = Set([ig])
-      igs_to_adjacency_tree[Set([ig])] = IndexAdjacencyTree(ig)
+      v = ((ig,), "unordered")
+      add_vertex!(adjacency_tree, v)
     end
     for (i, a) in path
-      inter_igs = intersect(ctree_to_igs[a[1]], ctree_to_igs[a[2]])
+      inter_igs = intersect(ctree_to_open_edges[a[1]], ctree_to_open_edges[a[2]])
       new_igs_index = (i == 1) ? 2 : 1
-      new_igs = setdiff(ctree_to_igs[a[new_igs_index]], inter_igs)
+      new_igs = setdiff(ctree_to_open_edges[a[new_igs_index]], inter_igs)
       adjacent_igs = union([ig_to_input_adj_igs[ig] for ig in inter_igs]...)
       # `inter_igs != []` means it's a tensor product
       if inter_igs != []
-        update_igs_to_adjacency_tree!(adjacent_igs, igs_to_adjacency_tree)
+        update_adjacency_tree!(adjacency_tree, adjacent_igs)
       end
       for ig in new_igs
         ig_to_input_adj_igs[ig] = adjacent_igs
       end
-      if length(igs_to_adjacency_tree) == 1
-        return collect(values(igs_to_adjacency_tree))[1]
+      # @info "adjacency_tree", adjacency_tree
+      if length(_roots(adjacency_tree)) == 1
+        return adjacency_tree
       end
     end
-    if length(igs_to_adjacency_tree) >= 1
-      return IndexAdjacencyTree([collect(values(igs_to_adjacency_tree))...], false)
+    __roots = _roots(adjacency_tree)
+    if length(__roots) > 1
+      new_v = (Tuple([r[1] for r in __roots]), "unordered")
+      _add_vertex_edges!(adjacency_tree, new_v; children=__roots)
     end
+    return adjacency_tree
   end
 end
 
