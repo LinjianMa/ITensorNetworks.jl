@@ -119,16 +119,14 @@ function _approximate_contract_pre_process(tn_leaves, ctrees)
       ctree_to_adj_tree[leaf] = _generate_adjacency_tree(
         leaf, ctree_to_path[leaf], ctree_to_igs
       )
-      # minswap_adjacency_tree!(ctree_to_adj_tree[leaf])
     end
     for c in ctrees
       adj_tree = _generate_adjacency_tree(c, ctree_to_path[c], ctree_to_igs)
       if adj_tree != nothing
         ctree_to_adj_tree[c] = adj_tree
-        @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
+        # @info "ctree_to_adj_tree[c]", ctree_to_adj_tree[c]
       end
     end
-    @assert false
     # mapping each index group to a linear ordering
     ig_to_linear_order = Dict{IndexGroup,Vector}()
     for leaf in tn_leaves
@@ -327,41 +325,45 @@ function approximate_contract(
     ctree_to_igs, ctree_to_adj_tree, ig_to_linear_order = _approximate_contract_pre_process(
       tn_leaves, ctrees
     )
-    ctree_to_noswap_tree = Dict{Vector,IndexAdjacencyTree}()
+    ctree_to_reference_order = Dict{Vector,Vector}()
+    ctree_to_edgeset_order = Dict{Vector,Vector}()
+    for leaf in tn_leaves
+      reference_order = _mps_partition_inds_set_order(
+        ITensorNetwork(leaf), ctree_to_igs[leaf]
+      )
+      order, _ = mindist_ordering(ctree_to_adj_tree[leaf], reference_order, vectorize(leaf))
+      ctree_to_edgeset_order[leaf] = order
+    end
     for (ii, c) in enumerate(ctrees)
       @info "$(ii)/$(length(ctrees))", "th pre-process"
       if ctree_to_igs[c] == []
         continue
       end
-      ctree_to_noswap_tree[c], ctree_to_adj_tree[c] = minswap_adjacency_tree(
+      ctree_to_reference_order[c], ctree_to_edgeset_order[c] = mindist_ordering(
         ctree_to_adj_tree[c],
-        ctree_to_adj_tree[c[1]],
-        ctree_to_adj_tree[c[2]],
+        ctree_to_edgeset_order[c[1]],
+        ctree_to_edgeset_order[c[2]],
         c[1] in tn_leaves,
         c[2] in tn_leaves,
         vectorize(c),
       )
-      @info "reference ordering", ctree_to_noswap_tree[c]
-      @info "edge set ordering", ctree_to_adj_tree[c]
+      # @info "reference ordering", ctree_to_reference_order[c]
+      # @info "edge set ordering", ctree_to_edgeset_order[c]
     end
-    return [ITensor(1.0)], 1.0
+    # return [ITensor(1.0)], 1.0
     # mapping each contraction tree to its contract igs
     ctree_to_contract_igs = Dict{Vector,Vector{IndexGroup}}()
     for c in ctrees
       if c[1] in tn_leaves
-        contract_igs = intersect(
-          ctree_to_adj_tree[c[2]].children, ctree_to_adj_tree[c[1]].children
-        )
-        l_igs_c1, r_igs_c1 = split_igs(ctree_to_adj_tree[c[1]].children, contract_igs)
-        ctree_to_adj_tree[c[1]].children = Vector{IndexGroup}([
+        contract_igs = intersect(ctree_to_edgeset_order[c[2]], ctree_to_edgeset_order[c[1]])
+        l_igs_c1, r_igs_c1 = split_igs(ctree_to_edgeset_order[c[1]], contract_igs)
+        ctree_to_edgeset_order[c[1]] = Vector{IndexGroup}([
           l_igs_c1..., contract_igs..., r_igs_c1...
         ])
       else
-        contract_igs = intersect(
-          ctree_to_adj_tree[c[1]].children, ctree_to_adj_tree[c[2]].children
-        )
-        l_igs_c2, r_igs_c2 = split_igs(ctree_to_adj_tree[c[2]].children, contract_igs)
-        ctree_to_adj_tree[c[2]].children = Vector{IndexGroup}([
+        contract_igs = intersect(ctree_to_edgeset_order[c[1]], ctree_to_edgeset_order[c[2]])
+        l_igs_c2, r_igs_c2 = split_igs(ctree_to_edgeset_order[c[2]], contract_igs)
+        ctree_to_edgeset_order[c[2]] = Vector{IndexGroup}([
           l_igs_c2..., contract_igs..., r_igs_c2...
         ])
       end
@@ -369,8 +371,8 @@ function approximate_contract(
       ctree_to_contract_igs[c[2]] = contract_igs
     end
     # special case when the network contains uncontracted inds
-    if haskey(ctree_to_adj_tree, ctrees[end])
-      ctree_to_contract_igs[ctrees[end]] = ctree_to_adj_tree[ctrees[end]].children
+    if haskey(ctree_to_edgeset_order, ctrees[end])
+      ctree_to_contract_igs[ctrees[end]] = ctree_to_edgeset_order[ctrees[end]]
     end
     # mapping each contraction tree to a tensor network
     ctree_to_tn_tree = Dict{Vector,Union{Dict{Vector,ITensor},Vector{ITensor}}}()
@@ -399,7 +401,7 @@ function approximate_contract(
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
         # TODO: change new_igs into a vector of igs
         inds_btree = ordered_igs_to_binary_tree(
-          ctree_to_adj_tree[c].children,
+          ctree_to_edgeset_order[c],
           ctree_to_contract_igs[c],
           ig_to_linear_order;
           ansatz=ansatz,
@@ -415,14 +417,14 @@ function approximate_contract(
       # TODO: this reversed ordering actually cause multiple problems
       # Below. We need to change it back.
       center_igs, cache_igs_left, cache_igs_right = get_igs_cache_info(
-        [ctree_to_adj_tree[i].children for i in [c, c[1], c[2]]],
+        [ctree_to_edgeset_order[i] for i in [c, c[1], c[2]]],
         [ctree_to_contract_igs[i] for i in [c, c[1], c[2]]],
       )
       # it's possible that `tree_noswap` has different boundaries than
-      # `ctree_to_adj_tree[c]`
-      if !_has_boundary(ctree_to_noswap_tree[c].children, cache_igs_left, cache_igs_right)
+      # `ctree_to_edgeset_order[c]`
+      if !_has_boundary(ctree_to_reference_order[c], cache_igs_left, cache_igs_right)
         interpolate_igs = _interpolate(
-          ctree_to_noswap_tree[c].children, ctree_to_adj_tree[c].children; size=swap_size
+          ctree_to_reference_order[c], ctree_to_edgeset_order[c]; size=swap_size
         )
         tn1 = get_child_tn(ctree_to_tn_tree, c[1])
         tn2 = get_child_tn(ctree_to_tn_tree, c[2])
@@ -447,7 +449,7 @@ function approximate_contract(
         ctree_to_tn_tree[c] = new_tn_tree
       else
         noswap_center_igs = _get_center_igs(
-          ctree_to_noswap_tree[c].children, cache_igs_left, cache_igs_right
+          ctree_to_reference_order[c], cache_igs_left, cache_igs_right
         )
         interpolate_center_igs = _interpolate(noswap_center_igs, center_igs; size=swap_size)
         @info "interpolate_center_igs has size", length(interpolate_center_igs)

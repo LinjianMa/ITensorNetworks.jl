@@ -1,76 +1,3 @@
-# Note that the children ordering matters here.
-mutable struct IndexAdjacencyTree
-  children::Union{Vector{IndexAdjacencyTree},Vector{IndexGroup}}
-  fixed_order::Bool
-end
-
-function Base.copy(tree::IndexAdjacencyTree)
-  node_to_copynode = Dict{IndexAdjacencyTree,IndexAdjacencyTree}()
-  for node in topo_sort(tree; type=IndexAdjacencyTree)
-    if node.children isa Vector{IndexGroup}
-      node_to_copynode[node] = IndexAdjacencyTree(node.children, node.fixed_order)
-      continue
-    end
-    copynode = IndexAdjacencyTree(
-      [node_to_copynode[n] for n in node.children], node.fixed_order
-    )
-    node_to_copynode[node] = copynode
-  end
-  return node_to_copynode[tree]
-end
-
-function Base.show(io::IO, tree::IndexAdjacencyTree)
-  out_str = "\n"
-  stack = [tree]
-  node_to_level = Dict{IndexAdjacencyTree,Int}()
-  node_to_level[tree] = 0
-  # pre-order traversal
-  while length(stack) != 0
-    node = pop!(stack)
-    indent_vec = ["  " for _ in 1:node_to_level[node]]
-    indent = string(indent_vec...)
-    if node.children isa Vector{IndexGroup}
-      for c in node.children
-        out_str = out_str * indent * string(c) * "\n"
-      end
-    else
-      out_str =
-        out_str * indent * "AdjTree:  [fixed_order]: " * string(node.fixed_order) * "\n"
-      for c in node.children
-        node_to_level[c] = node_to_level[node] + 1
-        push!(stack, c)
-      end
-    end
-  end
-  return print(io, out_str)
-end
-
-IndexAdjacencyTree(index_group::IndexGroup) = IndexAdjacencyTree([index_group], false)
-
-function get_adj_tree_leaves(tree::IndexAdjacencyTree)
-  if tree.children isa Vector{IndexGroup}
-    return tree.children
-  end
-  leaves = [get_adj_tree_leaves(c) for c in tree.children]
-  return vcat(leaves...)
-end
-
-function Base.contains(adj_tree::IndexAdjacencyTree, adj_igs::Set{IndexGroup})
-  leaves = Set(get_adj_tree_leaves(adj_tree))
-  return issubset(adj_igs, leaves)
-end
-
-function Base.iterate(x::IndexAdjacencyTree)
-  return iterate(x, 1)
-end
-
-function Base.iterate(x::IndexAdjacencyTree, index)
-  if index > length(x.children)
-    return nothing
-  end
-  return x.children[index], index + 1
-end
-
 function boundary_state(v::Tuple{Tuple,String}, adj_igs::Set)
   if Set(Leaves(v[1])) == adj_igs
     return "all"
@@ -190,7 +117,6 @@ function reorder!(
         adj_tree, new_v; children=children, parent=parent_vertex(adj_tree, v)
       )
       rem_vertex!(adj_tree, v)
-      # v.children = reverse(v.children)
     elseif state == "middle"
       @assert v[2] == "unordered"
       target_child = filter(c -> issubset(adj_igs, Set(Leaves(c[1]))), children)
@@ -345,13 +271,6 @@ end
 
 num_adj_swaps(v::Vector) = length(bubble_sort(v))
 
-function minswap_adjacency_tree!(adj_tree::IndexAdjacencyTree)
-  # TODO: this seems not correct, need to 1) generate the reference ordering, and 2) minimize the Kendall-Tau distance
-  leaves = Vector{IndexGroup}(get_adj_tree_leaves(adj_tree))
-  adj_tree.children = leaves
-  return adj_tree.fixed_order = true
-end
-
 function _mincut_permutation(perms::Vector{<:Vector}, tensors::Vector{ITensor})
   if length(perms) == 1
     return perms[1]
@@ -367,30 +286,40 @@ end
 """
 Inplace change `adj_tree` so that its children will be an order of its igs.
 """
-function mindist_adjacency_tree!(
-  adj_tree::IndexAdjacencyTree, input_tree::IndexAdjacencyTree, tensors::Vector{ITensor}
+function mindist_ordering(
+  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
+  reference_order::Vector,
+  tensors::Vector{ITensor},
 )
-  for node in topo_sort(adj_tree; type=IndexAdjacencyTree)
-    if node.children isa Vector{IndexGroup}
+  leaves = leaf_vertices(adj_tree)
+  root = _root(adj_tree)
+  v_to_order = Dict{Tuple{Tuple,String},Vector{IndexGroup}}()
+  for v in post_order_dfs_vertices(adj_tree, root)
+    if v in leaves
+      v_to_order[v] = [v[1]...]
       continue
     end
-    children_tree = [get_adj_tree_leaves(n) for n in node.children]
-    input_order = [n for n in input_tree.children if n in vcat(children_tree...)]
-    # Optimize the ordering of children. Note that for each child tree,
-    # its ordering is fixed so we don't optimize that.
-    if node.fixed_order
-      perms = [children_tree, reverse(children_tree)]
+    child_orders = Vector{Vector{IndexGroup}}()
+    children = child_vertices(adj_tree, v)
+    for inds_tuple in v[1]
+      cs = filter(c -> c[1] == inds_tuple, children)
+      @assert length(cs) == 1
+      push!(child_orders, v_to_order[cs[1]])
+    end
+    input_order = [n for n in reference_order if n in vcat(child_orders...)]
+    # Optimize the ordering in child_orders
+    if v[2] == "ordered"
+      perms = [child_orders, reverse(child_orders)]
       nswaps = [num_adj_swaps(vcat(p...), input_order) for p in perms]
       perms = [perms[i] for i in 1:length(perms) if nswaps[i] == min(nswaps...)]
-      children_tree = _mincut_permutation(perms, tensors)
+      output_order = _mincut_permutation(perms, tensors)
     else
-      children_tree = _best_perm_greedy(children_tree, input_order, tensors)
+      output_order = _best_perm_greedy(child_orders, input_order, tensors)
     end
-    node.children = vcat(children_tree...)
-    node.fixed_order = true
+    v_to_order[v] = vcat(output_order...)
   end
-  nswap = num_adj_swaps(adj_tree.children, input_tree.children)
-  return nswap
+  nswap = num_adj_swaps(v_to_order[root], reference_order)
+  return v_to_order[root], nswap
 end
 
 function _best_perm_greedy(vs::Vector{<:Vector}, order::Vector, tensors::Vector{ITensor})
@@ -409,7 +338,7 @@ function _merge(left_lists, right_lists)
   out_lists = []
   for l in left_lists
     for r in right_lists
-      push!(out_lists, IndexAdjacencyTree([l..., r...], true))
+      push!(out_lists, [l..., r...])
     end
   end
   return out_lists
@@ -453,20 +382,18 @@ return two adj trees, `tree1` and `tree2`, where `tree1` is a simple concatenati
 `input_tree1` and `input_tree2`, and `tree2` satisfy the constraints in `adj_tree`
 and has the minimin number of swaps w.r.t. `tree1`.
 """
-function minswap_adjacency_tree(
-  adj_tree::IndexAdjacencyTree,
-  input_tree1::IndexAdjacencyTree,
-  input_tree2::IndexAdjacencyTree,
+function mindist_ordering(
+  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
+  input_order_1::Vector,
+  input_order_2::Vector,
   input1_in_leaves::Bool,
   input2_in_leaves::Bool,
   tensors::Vector{ITensor},
 )
-  @timeit_debug ITensors.timer "minswap_adjacency_tree" begin
-    leaves_1 = get_adj_tree_leaves(input_tree1)
-    leaves_2 = get_adj_tree_leaves(input_tree2)
-    inter_igs = intersect(leaves_1, leaves_2)
-    leaves_1_left, leaves_1_right = split_igs(leaves_1, inter_igs)
-    leaves_2_left, leaves_2_right = split_igs(leaves_2, inter_igs)
+  @timeit_debug ITensors.timer "minswap_ordering" begin
+    inter_igs = intersect(input_order_1, input_order_2)
+    leaves_1_left, leaves_1_right = split_igs(input_order_1, inter_igs)
+    leaves_2_left, leaves_2_right = split_igs(input_order_2, inter_igs)
     @info "lengths of the input partitions",
     sort([
       length(leaves_1_left),
@@ -477,16 +404,10 @@ function minswap_adjacency_tree(
     # TODO: the inputs are not optimal. Consider using recursive bisection.
     if input1_in_leaves && !input2_in_leaves
       inputs = collect(permutations([leaves_1_left..., leaves_1_right...]))
-      inputs = [
-        IndexAdjacencyTree([leaves_2_left..., i..., leaves_2_right...], true) for
-        i in inputs
-      ]
+      inputs = [[leaves_2_left..., i..., leaves_2_right...] for i in inputs]
     elseif !input1_in_leaves && input2_in_leaves
       inputs = collect(permutations([leaves_2_left..., leaves_2_right...]))
-      inputs = [
-        IndexAdjacencyTree([leaves_1_left..., i..., leaves_1_right...], true) for
-        i in inputs
-      ]
+      inputs = [[leaves_1_left..., i..., leaves_1_right...] for i in inputs]
     else
       num_swaps_1 =
         min(length(leaves_1_left), length(leaves_2_left)) +
@@ -533,24 +454,28 @@ function minswap_adjacency_tree(
       end
     end
     adj_tree_copies = [copy(adj_tree) for _ in 1:length(inputs)]
-    nswaps_dist_list = [
-      mindist_adjacency_tree!(t, i, tensors) for (t, i) in zip(adj_tree_copies, inputs)
-    ]
+    outputs = []
+    nswaps_dist_list = []
+    for (t, i) in zip(adj_tree_copies, inputs)
+      output, nswaps = mindist_ordering(t, i, tensors)
+      push!(outputs, output)
+      push!(nswaps_dist_list, nswaps)
+    end
     inputs = [
       inputs[i] for i in 1:length(inputs) if nswaps_dist_list[i] == min(nswaps_dist_list...)
     ]
-    adj_tree_copies = [
-      adj_tree_copies[i] for
-      i in 1:length(adj_tree_copies) if nswaps_dist_list[i] == min(nswaps_dist_list...)
+    outputs = [
+      outputs[i] for
+      i in 1:length(outputs) if nswaps_dist_list[i] == min(nswaps_dist_list...)
     ]
     if length(inputs) == 1
-      return inputs[1], adj_tree_copies[1]
+      return inputs[1], outputs[1]
     end
     mincuts = [
-      _comb_mincuts_dist(ITensorNetwork(tensors), [igs.data for igs in adj_tree.children])
-      for adj_tree in adj_tree_copies
+      _comb_mincuts_dist(ITensorNetwork(tensors), [igs.data for igs in output]) for
+      output in outputs
     ]
-    return inputs[argmin(mincuts)], adj_tree_copies[argmin(mincuts)]
+    return inputs[argmin(mincuts)], outputs[argmin(mincuts)]
   end
 end
 

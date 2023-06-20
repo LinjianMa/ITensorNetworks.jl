@@ -44,7 +44,7 @@ Return the root vertex of a rooted directed graph
 """
 @traitfn function _root(graph::AbstractGraph::IsDirected)
   __roots = _roots(graph)
-  @assert length(_roots) == 1 "the input $(graph) has to be rooted"
+  @assert length(__roots) == 1 "the input $(graph) has to be rooted"
   return __roots[1]
 end
 

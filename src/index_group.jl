@@ -62,3 +62,20 @@ function split_igs(igs::Vector{IndexGroup}, inter_igs::Vector{IndexGroup})
   end
   return igs_left, igs_right
 end
+
+function _mps_partition_inds_set_order(tn::ITensorNetwork, igs::Vector{IndexGroup})
+  tn = ITensorNetwork{Any}(tn)
+  newinds = Vector{Index}()
+  ind_to_ig = Dict{Index,IndexGroup}()
+  for (i, ig) in enumerate(igs)
+    outinds = ig.data
+    new_ind = Index(dim(outinds), "temp" * string(i))
+    push!(newinds, new_ind)
+    ind_to_ig[new_ind] = ig
+    new_t = ITensor(outinds..., new_ind)
+    add_vertex!(tn, ("temp", i))
+    tn[("temp", i)] = new_t
+  end
+  inds_order = _mps_partition_inds_order(tn, newinds)
+  return [ind_to_ig[i] for i in inds_order]
+end
