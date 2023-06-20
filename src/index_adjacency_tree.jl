@@ -96,35 +96,33 @@ function reorder!(
   sub_tree = subgraph(v -> issubset(Set(Leaves(v[1])), Set(Leaves(root[1]))), adj_tree)
   traversal = post_order_dfs_vertices(sub_tree, root)
   path = [v for v in traversal if issubset(adj_igs, Set(Leaves(v[1])))]
-  # TODO: below is hacky
   new_root = root
   # get the boundary state
+  v_to_state = Dict{Tuple{Tuple,String},String}()
   for v in path
     state = boundary_state(v, adj_igs)
     if state == "invalid"
       return false, root
     end
+    v_to_state[v] = state
+  end
+  for v in path
     children = child_vertices(adj_tree, v)
     # reorder
-    if state in ["left", "right"] && state != boundary
+    if v_to_state[v] in ["left", "right"] && v_to_state[v] != boundary
       @assert v[2] == "ordered"
       new_v = (reverse(v[1]), v[2])
-      # TODO: below is hacky
-      if v == root
-        new_root = new_v
-      end
+      new_root = (v == root) ? new_v : new_root
       _add_vertex_edges!(
         adj_tree, new_v; children=children, parent=parent_vertex(adj_tree, v)
       )
       rem_vertex!(adj_tree, v)
-    elseif state == "middle"
+    elseif v_to_state[v] == "middle"
       @assert v[2] == "unordered"
       target_child = filter(c -> issubset(adj_igs, Set(Leaves(c[1]))), children)
       @assert length(target_child) == 1
       new_v = reorder_to_boundary!(adj_tree, v, target_child[1]; direction=boundary)
-      if v == root
-        new_root = new_v
-      end
+      new_root = (v == root) ? new_v : new_root
     end
   end
   return true, new_root
@@ -162,35 +160,22 @@ function update_adjacency_tree!(
     reordered_2, update_v2 = reorder!(
       adjacency_tree, v2, root_v_to_adjacent_igs[v2]; boundary="left"
     )
+    cs1 = child_vertices(adjacency_tree, update_v1)
+    cs2 = child_vertices(adjacency_tree, update_v2)
     if (!reordered_1) && (!reordered_2)
       new_v = ((update_v1[1], update_v2[1]), "unordered")
       _add_vertex_edges!(adjacency_tree, new_v; children=[update_v1, update_v2])
     elseif (reordered_2)
       new_v = ((update_v1[1], update_v2[1]...), "ordered")
-      _add_vertex_edges!(
-        adjacency_tree,
-        new_v;
-        children=[update_v1, child_vertices(adjacency_tree, update_v2)...],
-      )
+      _add_vertex_edges!(adjacency_tree, new_v; children=[update_v1, cs2...])
       rem_vertex!(adjacency_tree, update_v2)
     elseif (reordered_1)
       new_v = ((update_v1[1]..., update_v2[1]), "ordered")
-      _add_vertex_edges!(
-        adjacency_tree,
-        new_v;
-        children=[update_v2, child_vertices(adjacency_tree, update_v1)...],
-      )
+      _add_vertex_edges!(adjacency_tree, new_v; children=[update_v2, cs1...])
       rem_vertex!(adjacency_tree, update_v1)
     else
       new_v = ((update_v1[1]..., update_v2[1]...), "ordered")
-      _add_vertex_edges!(
-        adjacency_tree,
-        new_v;
-        children=[
-          child_vertices(adjacency_tree, update_v1)...,
-          child_vertices(adjacency_tree, update_v2)...,
-        ],
-      )
+      _add_vertex_edges!(adjacency_tree, new_v; children=[cs1..., cs2...])
       rem_vertex!(adjacency_tree, update_v1)
       rem_vertex!(adjacency_tree, update_v2)
     end

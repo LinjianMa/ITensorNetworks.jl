@@ -1,6 +1,5 @@
 mutable struct IndexGroup
   data::Vector
-  istree::Bool
 end
 
 function Base.show(io::IO, ig::IndexGroup)
