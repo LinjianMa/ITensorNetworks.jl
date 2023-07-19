@@ -147,6 +147,8 @@ function _get_low_rank_projector(tensor, inds1, inds2; cutoff, maxdim)
   # t00 = time()
   @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: eigen" begin
     F = eigen(tensor, inds1, inds2; cutoff=cutoff, maxdim=maxdim, ishermitian=true)
+    # Note: flops here
+    global SVD_FLOPS += dim(union(inds(tensor), inds(F.Vt)))
   end
   # t11 = time() - t00
   # @info "size of U", size(F.V), "size of diag", size(F.D), "costs", t11
@@ -405,6 +407,8 @@ function _update_cache_w_low_rank_projector!(
   Q, R = factorize(
     root_t, collect(keys(outinds_root_to_sim))...; which_decomp="qr", ortho="left"
   )
+  # Note: flops here
+  global QR_FLOPS += dim(union(inds(Q), inds(R)))
   qr_commonind = commoninds(Q, R)[1]
   R_sim = replaceinds(R, inds_to_sim)
   R_sim = replaceinds(R_sim, qr_commonind => sim(qr_commonind))

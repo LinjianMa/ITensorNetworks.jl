@@ -10,7 +10,9 @@ function contract(
 end
 
 function contract(
-  alg::Union{Algorithm"density_matrix",Algorithm"density_matrix_direct_eigen",Algorithm"ttn_svd"},
+  alg::Union{
+    Algorithm"density_matrix",Algorithm"density_matrix_direct_eigen",Algorithm"ttn_svd"
+  },
   tn::AbstractITensorNetwork;
   output_structure::Function=path_graph_structure,
   kwargs...,

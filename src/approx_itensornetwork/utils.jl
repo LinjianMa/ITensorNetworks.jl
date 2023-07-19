@@ -39,6 +39,10 @@ function _optcontract(
       )
     end
     output = contract(network; sequence=seq)
+    # Note: flops here
+    if length(network) > 1
+      global CONTRACT_FLOPS += sum(ITensors.contraction_cost(network; sequence=seq))
+    end
     return output
   end
 end

@@ -138,4 +138,23 @@ function __init__()
   )
 end
 
+# TODO: the flop counter below is just for benchmark purposes.
+# It is not supposed to be merged into the main branch.
+QR_FLOPS = 0
+SVD_FLOPS = 0
+CONTRACT_FLOPS = 0
+function reset_flops()
+  QR_FLOPS = 0
+  SVD_FLOPS = 0
+  return CONTRACT_FLOPS = 0
+end
+
+function print_flops()
+  flops = QR_FLOPS + SVD_FLOPS + CONTRACT_FLOPS
+  @info "The number of QR Gflops is $(QR_FLOPS / 10^9)"
+  @info "The number of SVD Gflops is $(SVD_FLOPS / 10^9)"
+  @info "The number of contract Gflops is $(CONTRACT_FLOPS / 10^9)"
+  @info "The number of total Gflops is $(flops / 10^9)"
+end
+
 end

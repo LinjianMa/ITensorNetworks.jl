@@ -396,7 +396,8 @@ function contract(tn::AbstractITensorNetwork, edge::AbstractEdge; merged_vertex=
   neighbors_src = setdiff(neighbors(tn, src(edge)), [dst(edge)])
   neighbors_dst = setdiff(neighbors(tn, dst(edge)), [src(edge)])
   new_itensor = tn[src(edge)] * tn[dst(edge)]
-
+  # Note: flops here
+  global CONTRACT_FLOPS += dim(union(inds(tn[src(edge)]), inds(tn[dst(edge)])))
   # The following is equivalent to:
   #
   # tn[dst(edge)] = new_itensor
@@ -439,7 +440,8 @@ function svd(
   tn = copy(tn)
   left_inds = uniqueinds(tn, edge)
   U, S, V = svd(tn[src(edge)], left_inds; lefttags=u_tags, right_tags=v_tags, kwargs...)
-
+  # Note: flops here
+  global SVD_FLOPS += dim(union(inds(tn[src(edge)]), inds(U)))
   rem_vertex!(tn, src(edge))
   add_vertex!(tn, U_vertex)
   tn[U_vertex] = U
@@ -464,7 +466,8 @@ function qr(
   tn = copy(tn)
   left_inds = uniqueinds(tn, edge)
   Q, R = factorize(tn[src(edge)], left_inds; tags, kwargs...)
-
+  # Note: flops here
+  global QR_FLOPS += dim(union(inds(Q), inds(R)))
   rem_vertex!(tn, src(edge))
   add_vertex!(tn, Q_vertex)
   tn[Q_vertex] = Q
@@ -492,7 +495,8 @@ function factorize(
   neighbors_X = setdiff(neighbors(tn, src(edge)), [dst(edge)])
   left_inds = uniqueinds(tn, edge)
   X, Y = factorize(tn[src(edge)], left_inds; tags, kwargs...)
-
+  # Note: flops here
+  global QR_FLOPS += dim(union(inds(X), inds(Y)))
   rem_vertex!(tn, src(edge))
   add_vertex!(tn, X_vertex)
   add_vertex!(tn, Y_vertex)
@@ -526,6 +530,8 @@ function _orthogonalize_edge(tn::AbstractITensorNetwork, edge::AbstractEdge; kwa
   left_inds = uniqueinds(tn, edge)
   ltags = tags(tn, edge)
   X, Y = factorize(tn[src(edge)], left_inds; tags=ltags, ortho="left", kwargs...)
+  # Note: flops here
+  global QR_FLOPS += dim(union(inds(X), inds(Y)))
   tn[src(edge)] = X
   tn[dst(edge)] *= Y
   return tn
@@ -556,6 +562,8 @@ function _truncate_edge(tn::AbstractITensorNetwork, edge::AbstractEdge; kwargs..
   left_inds = uniqueinds(tn, edge)
   ltags = tags(tn, edge)
   U, S, V = svd(tn[src(edge)], left_inds; lefttags=ltags, ortho="left", kwargs...)
+  # Note: add flops here
+  global SVD_FLOPS += dim(union(inds(tn[src(edge)]), inds(U)))
   tn[src(edge)] = U
   tn[dst(edge)] *= (S * V)
   return tn
@@ -573,6 +581,8 @@ function Base.:*(c::Number, ψ::AbstractITensorNetwork)
   v₁ = first(vertices(ψ))
   cψ = copy(ψ)
   cψ[v₁] *= c
+  # Note: flops here
+  global CONTRACT_FLOPS += dim(inds(cψ[v₁]))
   return cψ
 end
 
