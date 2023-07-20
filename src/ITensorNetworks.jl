@@ -144,9 +144,9 @@ QR_FLOPS = 0
 SVD_FLOPS = 0
 CONTRACT_FLOPS = 0
 function reset_flops()
-  QR_FLOPS = 0
-  SVD_FLOPS = 0
-  return CONTRACT_FLOPS = 0
+  global QR_FLOPS = 0
+  global SVD_FLOPS = 0
+  return global CONTRACT_FLOPS = 0
 end
 
 function print_flops()
