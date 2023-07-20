@@ -2,7 +2,8 @@ using ITensors, Graphs, NamedGraphs, TimerOutputs
 using Distributions, Random
 using KaHyPar, Metis
 using ITensorNetworks
-using ITensorNetworks: ising_network, contract, _nested_vector_to_digraph, _ansatz_tree
+using ITensorNetworks:
+  ising_network, contract, _nested_vector_to_digraph, _ansatz_tree, print_flops, reset_flops
 using OMEinsumContractionOrders
 using AbstractTrees
 
@@ -28,21 +29,23 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 # TimerOutputs.enable_debug_timings(@__MODULE__)
 ITensors.set_warn_order(100)
 
-N = (10, 10) # (9, 9) is the largest for comb
+N = (11, 11) # (9, 9) is the largest for comb
 link_space = 2
-maxdim = 100
+maxdim = 250
 ansatz = "mps"
 
 tn, inds_leaves = peps(N; link_space=link_space)
 ortho_center = div(length(inds_leaves), 2, RoundDown)
 btree = _ansatz_tree(inds_leaves, ansatz, ortho_center)
-@info "tn", tn
+# @info "tn", tn
 @info "inds_leaves is", inds_leaves
 for alg in ["density_matrix", "ttn_svd"]
+  reset_flops()
   @info "alg is", alg
   reset_timer!(ITensors.timer)
   out = @time bench(tn, btree; alg=alg, maxdim=maxdim)
   @info "out norm is", out[2]
   show(ITensors.timer)
   @info ""
+  print_flops()
 end
