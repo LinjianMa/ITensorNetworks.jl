@@ -199,40 +199,79 @@ function _update!(
   contraction_sequence_alg,
   contraction_sequence_kwargs,
 )
+  function _computational_cost(net)
+    if length(net) <= 1
+      return 0
+    end
+    seq = contraction_sequence(
+      net; alg=contraction_sequence_alg, contraction_sequence_kwargs...
+    )
+    return sum(ITensors.contraction_cost(net; sequence=seq))
+  end
+  function _contract(net)
+    return _optcontract(net; contraction_sequence_alg, contraction_sequence_kwargs)
+  end
   v = dst(edge)
   if haskey(caches.e_to_dm, edge)
     return nothing
   end
   child_to_dm = [c => caches.e_to_dm[NamedEdge(v, c)] for c in children]
-  pdms = []
+  # Here we save the dm tensor used to compute each partial density matrix.
+  # Original tensors rather than the computed pdm is saved since we can
+  # save costs for some cases by computing the pdm lazily, depending on
+  # the computational cost analysis.
+  es_to_dm_tensor = Vector{Pair}()
   for (child_v, dm_tensor) in child_to_dm
     es = [NamedEdge(src_v, v) for src_v in setdiff(children, child_v)]
     es = Set(vcat(es, [edge]))
-    if !haskey(caches.es_to_pdm, es)
-      caches.es_to_pdm[es] = _optcontract(
-        [dm_tensor, network...]; contraction_sequence_alg, contraction_sequence_kwargs
-      )
-    end
-    push!(pdms, caches.es_to_pdm[es])
+    push!(es_to_dm_tensor, es => dm_tensor)
   end
-  if length(pdms) == 0
-    sim_network = map(x -> replaceinds(x, inds_to_sim), network)
-    sim_network = map(dag, sim_network)
-    density_matrix = _optcontract(
-      [network..., sim_network...]; contraction_sequence_alg, contraction_sequence_kwargs
-    )
-  elseif length(pdms) == 1
-    sim_network = map(x -> replaceinds(x, inds_to_sim), network)
-    sim_network = map(dag, sim_network)
-    density_matrix = _optcontract(
-      [pdms[1], sim_network...]; contraction_sequence_alg, contraction_sequence_kwargs
-    )
+  sim_network = map(x -> replaceinds(x, inds_to_sim), network)
+  sim_network = map(dag, sim_network)
+  if length(es_to_dm_tensor) == 0
+    density_matrix = _contract([network..., sim_network...])
+  elseif length(es_to_dm_tensor) == 1
+    es, dm_tensor = es_to_dm_tensor[1]
+    if !haskey(caches.es_to_pdm, es)
+      caches.es_to_pdm[es] = _contract([dm_tensor, network...])
+    end
+    density_matrix = _contract([caches.es_to_pdm[es], sim_network...])
   else
-    simtensor = _sim(pdms[2], inds_to_sim)
-    simtensor = dag(simtensor)
-    density_matrix = _optcontract(
-      [pdms[1], simtensor]; contraction_sequence_alg, contraction_sequence_kwargs
-    )
+    @assert length(es_to_dm_tensor) == 2
+    es_1, dm_tensor_1 = es_to_dm_tensor[1]
+    es_2, dm_tensor_2 = es_to_dm_tensor[2]
+    cost_pdm_1 = _computational_cost([dm_tensor_1, network...])
+    cost_pdm_2 = _computational_cost([dm_tensor_2, sim_network...])
+    temp_t1 = ITensor(noncommoninds(vcat([dm_tensor_1], network)...))
+    temp_t2 = ITensor(noncommoninds(vcat([dm_tensor_2], sim_network)...))
+    # contracting and caching both networks
+    cost1 = cost_pdm_1 + cost_pdm_2 + _computational_cost([temp_t1, temp_t2])
+    # first contract and cache pdm_network_1, then contract with pdm_network_2
+    cost2 = cost_pdm_1 + _computational_cost([temp_t1, dm_tensor_2, sim_network...])
+    # first contract and cache pdm_network_2, then contract with pdm_network_1
+    cost3 = cost_pdm_2 + _computational_cost([temp_t2, dm_tensor_1, network...])
+    # @info "costs", cost1, cost2, cost3
+    if cost1 <= min(cost2, cost3)
+      if !haskey(caches.es_to_pdm, es_1)
+        caches.es_to_pdm[es_1] = _contract([dm_tensor_1, network...])
+      end
+      if !haskey(caches.es_to_pdm, es_2)
+        caches.es_to_pdm[es_2] = _contract([dm_tensor_2, network...])
+      end
+      simtensor = _sim(caches.es_to_pdm[es_2], inds_to_sim)
+      simtensor = dag(simtensor)
+      density_matrix = _contract([caches.es_to_pdm[es_1], simtensor])
+    elseif cost2 <= cost3
+      if !haskey(caches.es_to_pdm, es_1)
+        caches.es_to_pdm[es_1] = _contract([dm_tensor_1, network...])
+      end
+      density_matrix = _contract([caches.es_to_pdm[es_1], dm_tensor_2, sim_network...])
+    else
+      if !haskey(caches.es_to_pdm, es_2)
+        caches.es_to_pdm[es_2] = _contract([dm_tensor_2, network...])
+      end
+      density_matrix = _contract([caches.es_to_pdm[es_2], dm_tensor_1, sim_network...])
+    end
   end
   caches.e_to_dm[edge] = density_matrix
   return nothing
