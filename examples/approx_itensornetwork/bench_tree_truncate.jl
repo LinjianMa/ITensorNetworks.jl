@@ -2,7 +2,8 @@ using ITensors, Graphs, NamedGraphs, TimerOutputs
 using Distributions, Random
 using KaHyPar, Metis
 using ITensorNetworks
-using ITensorNetworks: ising_network, contract, _nested_vector_to_digraph
+using ITensorNetworks:
+  ising_network, contract, _nested_vector_to_digraph, print_flops, reset_flops
 using OMEinsumContractionOrders
 using AbstractTrees
 
@@ -44,33 +45,37 @@ TimerOutputs.enable_debug_timings(ITensorNetworks)
 ITensors.set_warn_order(100)
 
 # balanced binary tree
-# n = 16
-# link_space = 200
-# physical_spaces = [200 for i in 1:16]
-# maxdim = 100
-# tn, inds_leaves = balanced_binary_tree_tn(
-#   n; link_space=link_space, physical_spaces=physical_spaces
-# )
-# btree = _nested_vector_to_digraph(bipartite_sequence(inds_leaves))
-
-# unbalanced binary tree
-n = 16
-link_space = 500
-physical_spaces = [2 for i in 1:16]
-physical_spaces[1] = link_space
-maxdim = 200
-tn, inds_leaves = unbalanced_binary_tree_tn(
+n = 30
+link_space = 480
+physical_spaces = [200 for i in 1:n]
+maxdim = 50
+tn, inds_leaves = balanced_binary_tree_tn(
   n; link_space=link_space, physical_spaces=physical_spaces
 )
-btree = _nested_vector_to_digraph(linear_sequence(inds_leaves))
+btree = _nested_vector_to_digraph(bipartite_sequence(inds_leaves))
 
+# unbalanced binary tree
+# n = 30
+# link_space = 4096
+# physical_spaces = [2 for i in 1:n]
+# physical_spaces[1] = link_space
+# physical_spaces[end] = link_space
+# maxdim = 100 #div(link_space, 2)
+# tn, inds_leaves = unbalanced_binary_tree_tn(
+#   n; link_space=link_space, physical_spaces=physical_spaces
+# )
+# btree = _nested_vector_to_digraph(linear_sequence(inds_leaves))
+
+@info "link_space", link_space, "maxdim", maxdim
 @info inds_leaves
 # @info tn
-for alg in ["ttn_svd", "density_matrix", "density_matrix_direct_eigen"]
+for alg in ["ttn_svd", "density_matrix"]
+  reset_flops()
   @info "alg is", alg
   reset_timer!(ITensors.timer)
-  out = bench(tn, btree; alg=alg, maxdim=maxdim)
+  out = @time bench(tn, btree; alg=alg, maxdim=maxdim)
   @info "out norm is", out[2]
   show(ITensors.timer)
   @info ""
+  print_flops()
 end
