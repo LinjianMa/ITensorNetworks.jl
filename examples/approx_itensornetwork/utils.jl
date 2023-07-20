@@ -16,7 +16,7 @@ function linear_sequence(vec::Vector)
   return [linear_sequence(vec[1:(end - 1)]), vec[end]]
 end
 
-function bench(tn, btree; alg, maxdim)
+function bench(tn, btree; alg, maxdim, contraction_sequence_alg="sa_bipartite")
   @timeit ITensors.timer "approx_itensornetwork" begin
     return approx_itensornetwork(
       tn,
@@ -24,7 +24,23 @@ function bench(tn, btree; alg, maxdim)
       alg,
       cutoff=1e-15,
       maxdim=maxdim,
-      contraction_sequence_alg="sa_bipartite",
+      contraction_sequence_alg=contraction_sequence_alg,
+      contraction_sequence_kwargs=(;),
+    )
+  end
+end
+
+function bench_embed(
+  partitioned_tn, root; alg, maxdim, contraction_sequence_alg="sa_bipartite"
+)
+  @timeit ITensors.timer "approx_itensornetwork with embedding" begin
+    approx_itensornetwork(
+      partitioned_tn::DataGraph;
+      alg,
+      root=root,
+      cutoff=1e-15,
+      maxdim=maxdim,
+      contraction_sequence_alg=contraction_sequence_alg,
       contraction_sequence_kwargs=(;),
     )
   end
