@@ -1,12 +1,10 @@
 # TODO: test needed
 function _constrained_minswap_inds_ordering(
-  constraint_tree::NamedDiGraph{Tuple{Tuple,String}},
-  ref_ordering::Vector,
-  tn::ITensorNetwork,
+  constraint_tree::NamedDiGraph{Vector}, ref_ordering::Vector, tn::ITensorNetwork
 )
   leaves = leaf_vertices(constraint_tree)
   root = _root(constraint_tree)
-  v_to_order = Dict{Tuple{Tuple,String},Vector{Set}}()
+  v_to_order = Dict{Vector,Vector{Set}}()
   for v in post_order_dfs_vertices(constraint_tree, root)
     if v in leaves
       v_to_order[v] = [v[1]...]
@@ -14,8 +12,8 @@ function _constrained_minswap_inds_ordering(
     end
     child_orders = Vector{Vector{Set}}()
     children = child_vertices(constraint_tree, v)
-    for inds_tuple in v[1]
-      cs = filter(c -> c[1] == inds_tuple, children)
+    for inds_vector in v[1]
+      cs = filter(c -> c[1] == inds_vector, children)
       @assert length(cs) == 1
       push!(child_orders, v_to_order[cs[1]])
     end
@@ -35,7 +33,7 @@ function _constrained_minswap_inds_ordering(
 end
 
 function _constrained_minswap_inds_ordering(
-  constraint_tree::NamedDiGraph{Tuple{Tuple,String}},
+  constraint_tree::NamedDiGraph{Vector},
   input_order_1::Vector,
   input_order_2::Vector,
   tn::ITensorNetwork,

@@ -1,4 +1,4 @@
-function boundary_state(v::Tuple{Tuple,String}, adj_igs::Set)
+function boundary_state(v::Vector, adj_igs::Set)
   if Set(Leaves(v[1])) == adj_igs
     return "all"
   end
@@ -30,10 +30,7 @@ function boundary_state(v::Tuple{Tuple,String}, adj_igs::Set)
 end
 
 function reorder_to_boundary!(
-  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
-  v::Tuple{Tuple,String},
-  target_child::Tuple{Tuple,String};
-  direction="right",
+  adj_tree::NamedDiGraph{Vector}, v::Vector, target_child::Vector; direction="right"
 )
   new_v = v
   children = child_vertices(adj_tree, v)
@@ -42,9 +39,9 @@ function reorder_to_boundary!(
   if length(remain_children) == 1
     remain_child = remain_children[1]
     if direction == "right"
-      new_v = ((remain_child[1], target_child[1]), "ordered")
+      new_v = [[remain_child[1], target_child[1]], "ordered"]
     else
-      new_v = ((target_child[1], remain_child[1]), "ordered")
+      new_v = [[target_child[1], remain_child[1]], "ordered"]
     end
     if new_v != v
       _add_vertex_edges!(
@@ -53,12 +50,12 @@ function reorder_to_boundary!(
       rem_vertex!(adj_tree, v)
     end
   else
-    new_child = (Tuple([v[1] for v in remain_children]), "unordered")
+    new_child = [[v[1] for v in remain_children], "unordered"]
     _add_vertex_edges!(adj_tree, new_child; children=remain_children, parent=v)
     if direction == "right"
-      new_v = ((new_child[1], target_child[1]), "ordered")
+      new_v = [[new_child[1], target_child[1]], "ordered"]
     else
-      new_v = ((target_child[1], new_child[1]), "ordered")
+      new_v = [[target_child[1], new_child[1]], "ordered"]
     end
     _add_vertex_edges!(
       adj_tree, new_v; children=[new_child, target_child], parent=parent_vertex(adj_tree, v)
@@ -68,9 +65,7 @@ function reorder_to_boundary!(
   return new_v
 end
 
-function _add_vertex_edges!(
-  adj_tree::NamedDiGraph{Tuple{Tuple,String}}, v; children=[], parent=nothing
-)
+function _add_vertex_edges!(adj_tree::NamedDiGraph{Vector}, v; children=[], parent=nothing)
   add_vertex!(adj_tree, v)
   if parent != nothing
     add_edge!(adj_tree, parent => v)
@@ -84,10 +79,7 @@ end
 reorder adj_tree based on adj_igs
 """
 function reorder!(
-  adj_tree::NamedDiGraph{Tuple{Tuple,String}},
-  root::Tuple{Tuple,String},
-  adj_igs::Set;
-  boundary="right",
+  adj_tree::NamedDiGraph{Vector}, root::Vector, adj_igs::Set; boundary="right"
 )
   @assert boundary in ["left", "right"]
   if boundary_state(root, adj_igs) == "all"
@@ -98,7 +90,7 @@ function reorder!(
   path = [v for v in traversal if issubset(adj_igs, Set(Leaves(v[1])))]
   new_root = root
   # get the boundary state
-  v_to_state = Dict{Tuple{Tuple,String},String}()
+  v_to_state = Dict{Vector,String}()
   for v in path
     state = boundary_state(v, adj_igs)
     if state == "invalid"
@@ -130,11 +122,9 @@ end
 
 # Update both keys and values in igs_to_adjacency_tree based on adjacent_igs
 # NOTE: keys of `igs_to_adjacency_tree` are target igs, not those adjacent to ancestors
-function update_adjacency_tree!(
-  adjacency_tree::NamedDiGraph{Tuple{Tuple,String}}, adjacent_igs::Set
-)
+function update_adjacency_tree!(adjacency_tree::NamedDiGraph{Vector}, adjacent_igs::Set)
   @timeit_debug ITensors.timer "update_adjacency_tree" begin
-    root_v_to_adjacent_igs = Dict{Tuple{Tuple,String},Set}()
+    root_v_to_adjacent_igs = Dict{Vector,Set}()
     for r in _roots(adjacency_tree)
       root_igs = Set(Leaves(r[1]))
       common_igs = intersect(adjacent_igs, root_igs)
@@ -142,13 +132,15 @@ function update_adjacency_tree!(
         root_v_to_adjacent_igs[r] = common_igs
       end
     end
-    if length(root_v_to_adjacent_igs) == 1
+    # `length(root_v_to_adjacent_igs) == 0` hapends when some
+    # `common_igs == Set()`
+    if length(root_v_to_adjacent_igs) <= 1
       return nothing
     end
     # if at least 3: for now just put everything together
     if length(root_v_to_adjacent_igs) >= 3
       __roots = keys(root_v_to_adjacent_igs)
-      new_v = (Tuple([r[1] for r in __roots]), "unordered")
+      new_v = [[r[1] for r in __roots], "unordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=__roots)
       return nothing
     end
@@ -163,18 +155,18 @@ function update_adjacency_tree!(
     cs1 = child_vertices(adjacency_tree, update_v1)
     cs2 = child_vertices(adjacency_tree, update_v2)
     if (!reordered_1) && (!reordered_2)
-      new_v = ((update_v1[1], update_v2[1]), "unordered")
+      new_v = [[update_v1[1], update_v2[1]], "unordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=[update_v1, update_v2])
     elseif (reordered_2)
-      new_v = ((update_v1[1], update_v2[1]...), "ordered")
+      new_v = [[update_v1[1], update_v2[1]...], "ordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=[update_v1, cs2...])
       rem_vertex!(adjacency_tree, update_v2)
     elseif (reordered_1)
-      new_v = ((update_v1[1]..., update_v2[1]), "ordered")
+      new_v = [[update_v1[1]..., update_v2[1]], "ordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=[update_v2, cs1...])
       rem_vertex!(adjacency_tree, update_v1)
     else
-      new_v = ((update_v1[1]..., update_v2[1]...), "ordered")
+      new_v = [[update_v1[1]..., update_v2[1]...], "ordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=[cs1..., cs2...])
       rem_vertex!(adjacency_tree, update_v1)
       rem_vertex!(adjacency_tree, update_v2)
@@ -189,12 +181,15 @@ function _adjacency_tree(v::Tuple, path::Vector, par::DataGraph, p_edge_to_inds:
     # mapping each index group to adjacent input igs
     ig_to_input_adj_igs = Dict{Any,Set}()
     # mapping each igs to an adjacency tree
-    adjacency_tree = NamedDiGraph{Tuple{Tuple,String}}()
+    adjacency_tree = NamedDiGraph{Vector}()
     p_leaves = vcat(v[1:(end - 1)]...)
     p_edges = _neighbor_edges(par, p_leaves)
     for ig in map(e -> Set(p_edge_to_inds[e]), p_edges)
       ig_to_input_adj_igs[ig] = Set([ig])
-      v = ((ig,), "unordered")
+      # Note: we let the data be a nested vector rather than the nested tuple
+      # since the former is more efficient for function precompilation
+      # (the type will just be Vector{Any})
+      v = [[ig], "unordered"]
       add_vertex!(adjacency_tree, v)
     end
     for contraction in path
@@ -204,7 +199,8 @@ function _adjacency_tree(v::Tuple, path::Vector, par::DataGraph, p_edge_to_inds:
       sibling_igs = map(e -> Set(p_edge_to_inds[e]), _neighbor_edges(par, sibling_leaves))
       inter_igs = intersect(ancester_igs, sibling_igs)
       new_igs = setdiff(sibling_igs, inter_igs)
-      adjacent_igs = union([ig_to_input_adj_igs[ig] for ig in inter_igs]...)
+      adjacent_igs =
+        inter_igs != [] ? union([ig_to_input_adj_igs[ig] for ig in inter_igs]...) : Set()
       # `inter_igs != []` means it's a tensor product
       if inter_igs != []
         update_adjacency_tree!(adjacency_tree, adjacent_igs)
@@ -219,7 +215,7 @@ function _adjacency_tree(v::Tuple, path::Vector, par::DataGraph, p_edge_to_inds:
     end
     __roots = _roots(adjacency_tree)
     if length(__roots) > 1
-      new_v = (Tuple([r[1] for r in __roots]), "unordered")
+      new_v = [[r[1] for r in __roots], "unordered"]
       _add_vertex_edges!(adjacency_tree, new_v; children=__roots)
     end
     return adjacency_tree
