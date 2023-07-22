@@ -13,27 +13,29 @@ function approx_itensornetwork(
   contraction_sequence_alg,
   contraction_sequence_kwargs,
 )
-  @assert is_tree(binary_tree_partition)
-  @assert root in vertices(binary_tree_partition)
-  @assert _is_rooted_directed_binary_tree(dfs_tree(binary_tree_partition, root))
-  # The `binary_tree_partition` may contain multiple delta tensors to make sure
-  # the partition has a binary tree structure. These delta tensors could hurt the
-  # performance when computing density matrices so we remove them first.
-  partition_wo_deltas = _contract_deltas_ignore_leaf_partitions(
-    binary_tree_partition; root=root
-  )
-  density_matrix_alg =
-    alg isa Algorithm"density_matrix_direct_eigen" ? "direct_eigen" : "qr_svd"
-  return _approx_itensornetwork_density_matrix!(
-    partition_wo_deltas,
-    underlying_graph(binary_tree_partition);
-    root,
-    cutoff,
-    maxdim,
-    contraction_sequence_alg,
-    contraction_sequence_kwargs,
-    density_matrix_alg,
-  )
+  @timeit_debug ITensors.timer "approx_itensornetwork w/ density matrix" begin
+    @assert is_tree(binary_tree_partition)
+    @assert root in vertices(binary_tree_partition)
+    @assert _is_rooted_directed_binary_tree(dfs_tree(binary_tree_partition, root))
+    # The `binary_tree_partition` may contain multiple delta tensors to make sure
+    # the partition has a binary tree structure. These delta tensors could hurt the
+    # performance when computing density matrices so we remove them first.
+    partition_wo_deltas = _contract_deltas_ignore_leaf_partitions(
+      binary_tree_partition; root=root
+    )
+    density_matrix_alg =
+      alg isa Algorithm"density_matrix_direct_eigen" ? "direct_eigen" : "qr_svd"
+    return _approx_itensornetwork_density_matrix!(
+      partition_wo_deltas,
+      underlying_graph(binary_tree_partition);
+      root,
+      cutoff,
+      maxdim,
+      contraction_sequence_alg,
+      contraction_sequence_kwargs,
+      density_matrix_alg,
+    )
+  end
 end
 
 function approx_itensornetwork(
@@ -45,17 +47,19 @@ function approx_itensornetwork(
   contraction_sequence_alg,
   contraction_sequence_kwargs,
 )
-  @assert is_tree(binary_tree_partition)
-  @assert root in vertices(binary_tree_partition)
-  @assert _is_rooted_directed_binary_tree(dfs_tree(binary_tree_partition, root))
-  return _approx_itensornetwork_ttn_svd!(
-    binary_tree_partition;
-    root,
-    cutoff,
-    maxdim,
-    contraction_sequence_alg,
-    contraction_sequence_kwargs,
-  )
+  @timeit_debug ITensors.timer "approx_itensornetwork w/ ttn_svd" begin
+    @assert is_tree(binary_tree_partition)
+    @assert root in vertices(binary_tree_partition)
+    @assert _is_rooted_directed_binary_tree(dfs_tree(binary_tree_partition, root))
+    return _approx_itensornetwork_ttn_svd!(
+      binary_tree_partition;
+      root,
+      cutoff,
+      maxdim,
+      contraction_sequence_alg,
+      contraction_sequence_kwargs,
+    )
+  end
 end
 
 """
