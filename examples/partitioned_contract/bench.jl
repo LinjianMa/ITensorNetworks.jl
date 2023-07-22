@@ -1,7 +1,6 @@
 using ITensorNetworks
 
 function bench_lnZ(tntree::Vector; num_iter, kwargs...)
-  reset_timer!(ITensors.timer)
   function _run()
     out, log_acc_norm = partitioned_contract(tntree; kwargs...)
     out = Vector{ITensor}(out)
@@ -11,10 +10,6 @@ function bench_lnZ(tntree::Vector; num_iter, kwargs...)
     return log_acc_norm
   end
   out_list = []
-  for _ in 1:num_iter
-    push!(out_list, _run())
-  end
-  show(ITensors.timer)
   # after warmup, start to benchmark
   reset_timer!(ITensors.timer)
   for _ in 1:num_iter
