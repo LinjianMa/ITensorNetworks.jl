@@ -52,10 +52,10 @@ function partitioned_contract(
     traversal = post_order_dfs_vertices(contraction_tree, _root(contraction_tree))
     contractions = setdiff(traversal, leaves)
     p_edge_to_ordered_inds = _ind_orderings(par, contraction_tree; linear_ordering_alg)
-    for (p_edge, ordered_inds) in p_edge_to_ordered_inds
-      @info "edge", p_edge
-      @info "ordered_inds", ordered_inds
-    end
+    # for (p_edge, ordered_inds) in p_edge_to_ordered_inds
+    #   @info "edge", p_edge
+    #   @info "ordered_inds", ordered_inds
+    # end
     # Build the orderings used for the ansatz tree.
     # For each tuple in `v_to_ordered_p_edges`, the first item is the
     # reference ordering of uncontracted edges for the contraction `v`,
@@ -172,6 +172,9 @@ function partitioned_contract(
         )
         log_acc_norm += log_norm
       end
+      # tns below will not be used later, so delete to save the memory.
+      delete!(v_to_tn, c1)
+      delete!(v_to_tn, c2)
       v_to_tn[v] = tn
     end
     return v_to_tn[contractions[end]], log_acc_norm
