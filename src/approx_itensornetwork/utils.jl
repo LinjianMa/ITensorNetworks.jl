@@ -28,21 +28,26 @@ Contract of a vector of tensors, `network`, with a contraction sequence generate
 function _optcontract(
   network::Vector; contraction_sequence_alg="optimal", contraction_sequence_kwargs=(;)
 )
-  @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: _optcontract" begin
-    if length(network) == 0
-      return ITensor(1.0)
-    end
-    @assert network isa Vector{ITensor}
-    @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: contraction_sequence" begin
-      seq = contraction_sequence(
-        network; alg=contraction_sequence_alg, contraction_sequence_kwargs...
-      )
-    end
-    output = contract(network; sequence=seq)
-    # Note: flops here
-    if length(network) > 1
-      global CONTRACT_FLOPS += sum(ITensors.contraction_cost(network; sequence=seq))
-    end
-    return output
+  if length(network) == 0
+    return ITensor(1.0)
   end
+  @assert network isa Vector{ITensor}
+  @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: contraction_sequence" begin
+    seq = contraction_sequence(
+      network; alg=contraction_sequence_alg, contraction_sequence_kwargs...
+    )
+  end
+  @timeit_debug ITensors.timer "[approx_binary_tree_itensornetwork]: _optcontract" begin
+    output = contract(network; sequence=seq)
+  end
+  # Note: flops here
+  if length(network) > 1
+    if length(seq) == 1
+      cost = ITensors.contraction_cost(network; sequence=seq[1])
+    else
+      cost = ITensors.contraction_cost(network; sequence=seq)
+    end
+    global CONTRACT_FLOPS += sum(cost)
+  end
+  return output
 end

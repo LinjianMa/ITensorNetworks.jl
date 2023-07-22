@@ -122,12 +122,13 @@ The struct stores data used in the density matrix algorithm.
   innerinds_to_sim: mapping each inner index of the tn represented by `partition` to a sim index
   caches: all the cached density matrices
 """
-struct _DensityMartrixAlgGraph
+mutable struct _DensityMartrixAlgGraph
   partition::DataGraph
   out_tree::NamedGraph
   root::Any
   innerinds_to_sim::Dict{<:Index,<:Index}
   caches::_DensityMatrixAlgCaches
+  outinds::Vector
 end
 
 function _DensityMartrixAlgGraph(partition::DataGraph, out_tree::NamedGraph, root::Any)
@@ -139,6 +140,7 @@ function _DensityMartrixAlgGraph(partition::DataGraph, out_tree::NamedGraph, roo
     root,
     Dict(zip(innerinds, sim_innerinds)),
     _DensityMatrixAlgCaches(),
+    _noncommoninds(partition),
   )
 end
 
@@ -158,8 +160,7 @@ end
 """
 Returns a dict that maps the partition's outinds that are adjacent to `partition[root]` to siminds
 """
-function _densitymatrix_outinds_to_sim(partition, root)
-  outinds = _noncommoninds(partition)
+function _densitymatrix_outinds_to_sim(partition, root, outinds)
   outinds_root = intersect(outinds, noncommoninds(Vector{ITensor}(partition[root])...))
   outinds_root_to_sim = Dict(zip(outinds_root, [sim(ind) for ind in outinds_root]))
   return outinds_root_to_sim
@@ -200,13 +201,20 @@ function _update!(
   contraction_sequence_kwargs,
 )
   function _computational_cost(net)
-    if length(net) <= 1
-      return 0
+    @timeit_debug ITensors.timer "_computational_cost" begin
+      if length(net) <= 1
+        return 0
+      end
+      seq = contraction_sequence(
+        net; alg=contraction_sequence_alg, contraction_sequence_kwargs...
+      )
+      if length(seq) == 1
+        cost = ITensors.contraction_cost(net; sequence=seq[1])
+      else
+        cost = ITensors.contraction_cost(net; sequence=seq)
+      end
+      return sum(cost)
     end
-    seq = contraction_sequence(
-      net; alg=contraction_sequence_alg, contraction_sequence_kwargs...
-    )
-    return sum(ITensors.contraction_cost(net; sequence=seq))
   end
   function _contract(net)
     return _optcontract(net; contraction_sequence_alg, contraction_sequence_kwargs)
@@ -328,6 +336,10 @@ function _rem_vertex!(
     contraction_sequence_alg,
     contraction_sequence_kwargs,
   )
+  U_inds = noncommoninds(U)
+  alg_graph.outinds = union(
+    setdiff(U_inds, alg_graph.outinds), setdiff(alg_graph.outinds, U_inds)
+  )
   new_root = child_vertices(dm_dfs_tree, root)[1]
   alg_graph.partition[new_root] = disjoint_union(
     alg_graph.partition[new_root], ITensorNetwork([root_tensor])
@@ -379,7 +391,9 @@ function _update_cache_w_low_rank_projector!(
   contraction_sequence_kwargs,
 )
   dm_dfs_tree = dfs_tree(alg_graph.out_tree, root)
-  outinds_root_to_sim = _densitymatrix_outinds_to_sim(alg_graph.partition, root)
+  outinds_root_to_sim = _densitymatrix_outinds_to_sim(
+    alg_graph.partition, root, alg_graph.outinds
+  )
   # For keys that appear in both dicts, the value in
   # `outinds_root_to_sim` is used.
   inds_to_sim = merge(alg_graph.innerinds_to_sim, outinds_root_to_sim)
@@ -417,7 +431,9 @@ function _update_cache_w_low_rank_projector!(
   contraction_sequence_kwargs,
 )
   dm_dfs_tree = dfs_tree(alg_graph.out_tree, root)
-  outinds_root_to_sim = _densitymatrix_outinds_to_sim(alg_graph.partition, root)
+  outinds_root_to_sim = _densitymatrix_outinds_to_sim(
+    alg_graph.partition, root, alg_graph.outinds
+  )
   # For keys that appear in both dicts, the value in
   # `outinds_root_to_sim` is used.
   inds_to_sim = merge(alg_graph.innerinds_to_sim, outinds_root_to_sim)
@@ -443,9 +459,11 @@ function _update_cache_w_low_rank_projector!(
     contraction_sequence_alg,
     contraction_sequence_kwargs,
   )
-  Q, R = factorize(
-    root_t, collect(keys(outinds_root_to_sim))...; which_decomp="qr", ortho="left"
-  )
+  @timeit_debug ITensors.timer "factorize" begin
+    Q, R = factorize(
+      root_t, collect(keys(outinds_root_to_sim))...; which_decomp="qr", ortho="left"
+    )
+  end
   # Note: flops here
   global QR_FLOPS += dim(union(inds(Q), inds(R)))
   qr_commonind = commoninds(Q, R)[1]
