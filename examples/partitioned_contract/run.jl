@@ -2,13 +2,14 @@ using ITensors, Graphs, NamedGraphs, TimerOutputs
 using Distributions, Random
 using KaHyPar, Metis
 using ITensorNetworks
-using ITensorNetworks: ising_network, contract
+using ITensorNetworks: ising_network, contract, _recursive_bisection
 using OMEinsumContractionOrders
+using AbstractTrees
 
 include("exact_contract.jl")
 include("3d_cube.jl")
 include("sweep_contractor.jl")
-include("random_circuit.jl")
+# include("random_circuit.jl")
 include("bench.jl")
 
 Random.seed!(1234)
@@ -19,9 +20,11 @@ ITensors.set_warn_order(100)
 #=
 Exact contraction of ising_network
 =#
-# N = (3, 3, 3)
-# beta = 0.3
-# network = ising_network(named_grid(N), beta=beta)
+# N = (28, 28)
+# beta = 0.44
+# distribution = Uniform{Float64}(-0.5, 1.0)
+# network = randomITensorNetwork(distribution, named_grid(N); link_space=2)
+# # network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
 # exact_contract(network; sc_target=28)
 
 #=
@@ -53,17 +56,20 @@ Bugs
 # )
 
 #=
-bench_3d_cube_lnZ
+bench_2d_cube_lnZ
 =#
-# N = (6, 6, 6)
-# beta = 0.3
-# network = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
-# tntree = build_tntree(N, network; block_size=(1, 1, 1), env_size=(6, 1, 1))
+# N = (28, 28)
+# beta = 0.44
+# maxdim = 64
+# tn = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
+# # distribution = Uniform{Float64}(-0.5, 1.0)
+# # tn = randomITensorNetwork(distribution, named_grid(N); link_space=2)
+# tntree = build_tntree(N, tn; block_size=(1, 1), env_size=(28, 1))
 # @time bench_lnZ(
 #   tntree;
 #   num_iter=1,
-#   cutoff=1e-12,
-#   maxdim=128,
+#   cutoff=1e-15,
+#   maxdim=maxdim,
 #   ansatz="mps",
 #   approx_itensornetwork_alg="density_matrix",
 #   swap_size=10000,
@@ -71,6 +77,38 @@ bench_3d_cube_lnZ
 #   contraction_sequence_kwargs=(;),
 #   linear_ordering_alg="bottom_up",
 # )
+
+# ltn = sweep_contractor_tensor_network(tn, (i, j) -> (i, j))
+# @time lnz = contract_w_sweep(ltn; rank=maxdim)
+# @info "lnZ of SweepContractor is", lnz
+
+#=
+bench_3d_cube_lnZ
+=#
+# N = (5, 5, 5)
+# beta = 0.3
+# maxdim = 64
+# ansatz= "mps"
+# tn = ising_network(named_grid(N), beta; h=0.0, szverts=nothing)
+# # distribution = Uniform{Float64}(-0.4, 1.0)
+# # tn = randomITensorNetwork(distribution, named_grid(N); link_space=2)
+# tntree = build_tntree(N, tn; block_size=(1, 1, 1), env_size=(5, 2, 1))
+# @time bench_lnZ(
+#   tntree;
+#   num_iter=1,
+#   cutoff=1e-14,
+#   maxdim=maxdim,
+#   ansatz=ansatz,
+#   approx_itensornetwork_alg="density_matrix",
+#   swap_size=10000,
+#   contraction_sequence_alg="sa_bipartite",
+#   contraction_sequence_kwargs=(;),
+#   linear_ordering_alg="bottom_up",
+# )
+
+# ltn = sweep_contractor_tensor_network(tn, (i, j, k) -> (i * N[1] + j, k + 0.1 * randn()))
+# @time lnz = contract_w_sweep(ltn; rank=maxdim)
+# @info "lnZ of SweepContractor is", lnz
 
 #=
 bench_3d_cube_magnetization
@@ -119,47 +157,67 @@ SweepContractor
 #=
 random regular graph
 =#
-# nvertices = 220
-# deg = 3
+nvertices = 220
+deg = 3
+beta = 0.65
+maxdim = 128
+# swap_size = 4
+num_iter = 1
 # distribution = Uniform{Float64}(-0.2, 1.0)
 # network = randomITensorNetwork(
 #   distribution, random_regular_graph(nvertices, deg); link_space=2
 # )
-# # exact_contract(network; sc_target=30)
-# # -26.228887728408008 (-1.0, 1.0)
-# # 5.633462619348083 (-0.2, 1.0)
-# # nvertices_per_partition=10 works 15/20 not work
-# # tntree = partitioned_contraction_sequence(network; nvertices_per_partition=10)
-# @time bench_lnZ(
-#   network;
-#   num_iter=2,
-#   nvertices_per_partition=10,
-#   backend="KaHyPar",
-#   cutoff=1e-12,
-#   maxdim=512,
-#   ansatz="mps",
-#   approx_itensornetwork_alg="density_matrix",
-#   swap_size=4,
-#   contraction_sequence_alg="sa_bipartite",
-#   contraction_sequence_kwargs=(;),
-#   linear_ordering_alg="bottom_up",
-# )
+tn = ising_network(
+  NamedGraph(random_regular_graph(nvertices, deg)), beta; h=0.0, szverts=nothing
+)
+# exact_contract(tn; sc_target=30)
+# -26.228887728408008 (-1.0, 1.0)
+# 5.633462619348083 (-0.2, 1.0)
+# nvertices_per_partition = 5 # works 15/20 not work
+# tntree = partitioned_contraction_sequence(network; nvertices_per_partition=10)
+
+output_dict = Dict()
+for nvertices_per_partition in [10]
+  for swap_size in [8]
+    out = @time bench_lnZ(
+      tn;
+      num_iter=num_iter,
+      nvertices_per_partition=nvertices_per_partition,
+      backend="Metis",
+      cutoff=1e-12,
+      maxdim=maxdim,
+      ansatz="mps",
+      approx_itensornetwork_alg="density_matrix",
+      swap_size=swap_size,
+      contraction_sequence_alg="sa_bipartite",
+      contraction_sequence_kwargs=(;),
+      linear_ordering_alg="bottom_up",
+    )
+    output_dict[("par:$(nvertices_per_partition)", "swap:$(swap_size)")] = out
+    @info output_dict
+  end
+end
+
+# tensors = collect(Leaves(_recursive_bisection(tn, Vector{ITensor}(tn))))
+# ltn = sweep_contractor_tensor_network(ITensorNetwork(tensors), i -> (0.0001 * randn(), i))
+# @time lnz = contract_w_sweep(ltn; rank=maxdim)
+# @info "lnZ of SweepContractor is", lnz
 
 #=
 Simulation of random quantum circuit
 =#
-N = (6, 6)
-depth = 6
-sequence = random_circuit_line_partition_sequence(N, depth)
-@time bench_lnZ(
-  sequence;
-  num_iter=1,
-  cutoff=1e-12,
-  maxdim=256,
-  ansatz="mps",
-  approx_itensornetwork_alg="density_matrix",
-  swap_size=8,
-  contraction_sequence_alg="sa_bipartite",
-  contraction_sequence_kwargs=(;),
-  linear_ordering_alg="bottom_up",
-)
+# N = (6, 6)
+# depth = 6
+# sequence = random_circuit_line_partition_sequence(N, depth)
+# @time bench_lnZ(
+#   sequence;
+#   num_iter=1,
+#   cutoff=1e-12,
+#   maxdim=256,
+#   ansatz="mps",
+#   approx_itensornetwork_alg="density_matrix",
+#   swap_size=8,
+#   contraction_sequence_alg="sa_bipartite",
+#   contraction_sequence_kwargs=(;),
+#   linear_ordering_alg="bottom_up",
+# )
