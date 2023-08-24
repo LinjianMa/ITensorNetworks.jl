@@ -34,6 +34,7 @@ function partitioned_contract(
   contraction_sequence_alg,
   contraction_sequence_kwargs,
   linear_ordering_alg,
+  use_linear_ordering,
 )
   @info "ansatz: $(ansatz)"
   @info "approx_itensornetwork_alg: $(approx_itensornetwork_alg)"
@@ -51,7 +52,7 @@ function partitioned_contract(
     leaves = leaf_vertices(contraction_tree)
     traversal = post_order_dfs_vertices(contraction_tree, _root(contraction_tree))
     contractions = setdiff(traversal, leaves)
-    p_edge_to_ordered_inds = _ind_orderings(par, contraction_tree; linear_ordering_alg)
+    p_edge_to_ordered_inds = _ind_orderings(par, contraction_tree; linear_ordering_alg, use_linear_ordering)
     for (p_edge, ordered_inds) in p_edge_to_ordered_inds
       @info "edge", p_edge
       @info "ordered_inds", ordered_inds
@@ -97,8 +98,6 @@ function partitioned_contract(
           c1_inds_ordering,
           c2_inds_ordering,
           tn,
-          c1 in leaves,
-          c2 in leaves,
         )
       end
       ref_p_edges = p_edges[_findperm(v_inds, ref_inds_ordering)]
@@ -132,12 +131,7 @@ function partitioned_contract(
     for (ii, v) in enumerate(contractions)
       @info "$(ii)/$(length(contractions)) th tree approximation"
       c1, c2 = child_vertices(contraction_tree, v)
-      tn = ITensorNetwork()
-      ts = vcat(Vector{ITensor}(v_to_tn[c1]), Vector{ITensor}(v_to_tn[c2]))
-      for (i, t) in enumerate(ts)
-        add_vertex!(tn, i)
-        tn[i] = t
-      end
+      tn = ITensorNetwork(vcat(Vector{ITensor}(v_to_tn[c1]), Vector{ITensor}(v_to_tn[c2])))
       ref_p_edges, p_edges, contract_edges = v_to_ordered_p_edges[v]
       if p_edges == []
         @assert v == contractions[end]
@@ -183,7 +177,7 @@ end
 
 # Note: currently this function assumes that the input tn represented by 'par' is closed
 # TODO: test needed:
-function _ind_orderings(par::DataGraph, contraction_tree::NamedDiGraph; linear_ordering_alg)
+function _ind_orderings(par::DataGraph, contraction_tree::NamedDiGraph; linear_ordering_alg, use_linear_ordering)
   leaves = leaf_vertices(contraction_tree)
   traversal = post_order_dfs_vertices(contraction_tree, _root(contraction_tree))
   contractions = setdiff(traversal, leaves)
@@ -228,10 +222,13 @@ function _ind_orderings(par::DataGraph, contraction_tree::NamedDiGraph; linear_o
       sub_tn = subgraph(u -> u in p, tn)
       p_edge_to_ordered_inds[e] = _mps_partition_inds_order(sub_tn, source_inds)
       =#
-      p_edge_to_ordered_inds[e] = source_inds
-      #_mps_partition_inds_order(
-      #  tn, source_inds; alg=linear_ordering_alg
-      #)
+      if use_linear_ordering
+        p_edge_to_ordered_inds[e] = _mps_partition_inds_order(
+          tn, source_inds; alg=linear_ordering_alg
+        )
+      else
+        p_edge_to_ordered_inds[e] = source_inds
+      end
       # @info "tn has size", length(vertices(tn))
       # @info "out ordering is", p_edge_to_ordered_inds[e]
     end
@@ -266,12 +263,12 @@ end
 function _nested_vector_pair(
   ::Algorithm"comb", inds_orderings::Vector, ortho_center::Integer
 )
-  nested_vec_left = line_to_tree(
-    map(ig -> line_to_tree(ig), inds_orderings[1:ortho_center])
-  )
-  nested_vec_right = line_to_tree(
-    map(ig -> line_to_tree(ig), inds_orderings[end:-1:(ortho_center + 1)])
-  )
+  nested_vec_left = map(ig -> line_to_tree(ig), inds_orderings[1:ortho_center])
+  nested_vec_left = map(v -> length(v) == 1 ? v[1] : v, nested_vec_left)
+  nested_vec_left = line_to_tree(nested_vec_left)
+  nested_vec_right = map(ig -> line_to_tree(ig), inds_orderings[end:-1:(ortho_center + 1)])
+  nested_vec_right = map(v -> length(v) == 1 ? v[1] : v, nested_vec_right)
+  nested_vec_right = line_to_tree(nested_vec_right)
   return nested_vec_left, nested_vec_right
 end
 

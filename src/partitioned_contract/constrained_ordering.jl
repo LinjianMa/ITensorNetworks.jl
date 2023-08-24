@@ -37,25 +37,12 @@ function _constrained_minswap_inds_ordering(
   input_order_1::Vector,
   input_order_2::Vector,
   tn::ITensorNetwork,
-  c1_in_leaves::Bool,
-  c2_in_leaves::Bool,
 )
   inter_igs = intersect(input_order_1, input_order_2)
   left_1, right_1 = _split_array(input_order_1, inter_igs)
   left_2, right_2 = _split_array(input_order_2, inter_igs)
   # @info "lengths of the input partitions",
   # sort([length(left_1), length(right_2), length(left_2), length(right_2)])
-
-  # TODO: this conditions seems not that useful, except the quantum
-  # circuit simulation experiment. We should consider removing this
-  # once confirming that this is only useful for special cases.
-  if c1_in_leaves && !c2_in_leaves
-    inputs = collect(permutations([left_1..., right_1...]))
-    inputs = [[left_2..., i..., right_2...] for i in inputs]
-  elseif !c1_in_leaves && c2_in_leaves
-    inputs = collect(permutations([left_2..., right_2...]))
-    inputs = [[left_1..., i..., right_1...] for i in inputs]
-  else
     num_swaps_1 =
       min(length(left_1), length(left_2)) + min(length(right_1), length(right_2))
     num_swaps_2 =
@@ -69,7 +56,6 @@ function _constrained_minswap_inds_ordering(
     else
       inputs = _low_swap_merge(left_1, right_1, left_2, right_2)
     end
-  end
   # ####
   # mincuts = map(o -> _mps_mincut_partition_cost(tn, o), inputs)
   # inputs = [inputs[i] for i in 1:length(inputs) if mincuts[i] == mincuts[argmin(mincuts)]]
