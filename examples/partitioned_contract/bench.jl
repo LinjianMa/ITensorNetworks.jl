@@ -7,7 +7,11 @@ function bench_lnZ(tntree::Vector, accurate_lnZ; num_iter, kwargs...)
     log_acc_norm = log(norm(out)) + log_acc_norm
     @info "out value is", out[1].tensor
     @info "out norm is", log_acc_norm
-    return abs((log_acc_norm - accurate_lnZ) / accurate_lnZ)
+    if accurate_lnZ == 0
+      return abs(log_acc_norm)
+    else
+      return abs((log_acc_norm - accurate_lnZ) / accurate_lnZ)
+    end
   end
   out_list = []
   time_list = []

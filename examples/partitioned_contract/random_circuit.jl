@@ -10,13 +10,7 @@ function gate_tensors(hilbert::Vector{<:Index}, gates; applydag=false)
   hilbert = copy(hilbert)
   Us = ITensor[]
   for g in gates
-    if applydag == true
-      t = dag(gate(hilbert, g))
-      inds1 = [hilbert[n] for n in g[2]]
-      t = swapinds(t, inds1, [i' for i in inds1])
-    else
-      t = gate(hilbert, g)
-    end
+    t = get_tensor_at_gate(hilbert, g; applydag=applydag)
     if length(g[2]) == 2
       ind = hilbert[g[2][1]]
       L, R = factorize(t, ind, ind'; cutoff=1e-16)
@@ -30,6 +24,49 @@ function gate_tensors(hilbert::Vector{<:Index}, gates; applydag=false)
   end
   # @info "gates", gates
   # @info "hilbert", hilbert
+  return Us, hilbert
+end
+
+function get_tensor_at_gate(hilbert, g; applydag=false)
+  if applydag == true
+    t = dag(gate(hilbert, g))
+    inds1 = [hilbert[n] for n in g[2]]
+    t = swapinds(t, inds1, [i' for i in inds1])
+  else
+    t = gate(hilbert, g)
+  end
+  return t
+end
+
+# Return all the tensors represented by `gates`, and the `hilbert`
+# after applying these gates. The `hilbert` is a vector if indices.
+# In the output tensors, those representing one-qubit gates are already
+# contracted to reduce the output number of tensors.
+function gate_tensors_simplify(hilbert::Vector{<:Index}, gates; applydag=false)
+  hilbert = copy(hilbert)
+  Us = ITensor[]
+  # maps the coordinate in `hilbert` to the index in `Us`.
+  coord_to_Us_index = Dict()
+  for g in gates
+    t = get_tensor_at_gate(hilbert, g; applydag=applydag)
+    if length(g[2]) == 2
+      ind = hilbert[g[2][1]]
+      L, R = factorize(t, ind, ind'; cutoff=1e-16)
+      push!(Us, L, R)
+      coord_to_Us_index[g[2][1]] = length(Us) - 1
+      coord_to_Us_index[g[2][2]] = length(Us)
+    else
+      if haskey(coord_to_Us_index, g[2][1])
+        index = coord_to_Us_index[g[2][1]]
+        Us[index] = Us[index] * t
+      else
+        push!(Us, t)
+      end
+    end
+    for n in g[2]
+      hilbert[n] = hilbert[n]'
+    end
+  end
   return Us, hilbert
 end
 
@@ -102,4 +139,35 @@ function random_circuit_line_partition_sequence(
   end
   push!(tensor_partitions, productstate(hilbert)[:])
   return line_network(tensor_partitions)
+end
+
+function random_circuit_four_part_partition(
+  N, depth; twoqubitgates="CX", onequbitgates="Ry"
+)
+  @assert N isa Number || length(N) <= 2
+  # Each layer contains multiple two-qubit gates, followed by one-qubit
+  # gates, each applying on one qubit.
+  layers = randomcircuit(
+    N; depth=depth, twoqubitgates=twoqubitgates, onequbitgates=onequbitgates
+  )
+  partition_gates = []
+  for (i, l) in enumerate(layers)
+    push!(partition_gates, line_partition_gates(N, l; order=i % 4)...)
+  end
+  hilbert = qubits(prod(N))
+  left_hilbert = Vector{ITensor}(productstate(hilbert)[:])
+  # part1 = []
+  # for gates in partition_gates
+  #   tensors, hilbert = gate_tensors_simplify(hilbert, gates)
+  #   part1 = vcat(part1, tensors)
+  # end
+  part1, hilbert = gate_tensors_simplify(hilbert, vcat(partition_gates...))
+  # part2 = []
+  # for gates in reverse(partition_gates)
+  #   tensors, hilbert = gate_tensors_simplify(hilbert, reverse(gates); applydag=true)
+  #   part2 = vcat(part2, tensors)
+  # end
+  partition_gates_reverse = reverse([reverse(gates) for gates in partition_gates])
+  part2, hilbert = gate_tensors_simplify(hilbert, vcat(partition_gates_reverse...); applydag=true)
+  return left_hilbert, Vector{ITensor}(productstate(hilbert)[:]), Vector{ITensor}(part1), Vector{ITensor}(part2)
 end
